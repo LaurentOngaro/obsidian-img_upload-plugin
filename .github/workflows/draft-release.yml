@@ -1,0 +1,57 @@
+name: Create draft release on push to main
+
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  create-draft-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Prepare draft release artifact
+        run: |
+          mkdir -p release
+          TAG=draft-${{ github.run_number }}-${{ github.sha }}
+          zip -r "release/obsidian-img_upload-plugin-${TAG}.zip" main.js manifest.json README.md LICENSE package.json
+
+      - name: Create draft release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: draft-${{ github.run_number }}-${{ github.sha }}
+          release_name: 'Draft release for main (run #${{ github.run_number }})'
+          body: |
+            Draft release created automatically for push to `main`.
+
+            Commit: `${{ github.sha }}`
+            Branch: `${{ github.ref }}`
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload draft release asset
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: release/obsidian-img_upload-plugin-draft-${{ github.run_number }}-${{ github.sha }}.zip
+          asset_name: obsidian-img_upload-plugin-draft-${{ github.run_number }}-${{ github.sha }}.zip
+          asset_content_type: application/zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

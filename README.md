@@ -1,5 +1,7 @@
 # Cloud Image Uploader for Obsidian
 
+[![Release](https://img.shields.io/github/v/release/LaurentOngaro/obsidian-img_upload-plugin?sort=semver)](https://github.com/LaurentOngaro/obsidian-img_upload-plugin/releases)
+
 This plugin uploads images to [Cloudinary](https://cloudinary.com/) instead of just storing them locally in your vault.
 
 ## Features
@@ -32,9 +34,13 @@ You can install this plugin directly from the GitHub repository:
 
 Notes:
 
-- You can also download a release ZIP (if available) instead of cloning.
-- The `build.bat` script is a simple convenience for Windows that runs `npm install` and `npm run build`.
+- You can also download a release ZIP (if available) instead of cloning. When we tag a release (v*.*.\*) this repo runs a build workflow that creates a ZIP release asset containing `main.js`, `manifest.json`, `README.md`, `LICENSE` and `package.json`.
+- The `build.bat` script is a simple convenience for Windows that runs `npm install` and `npm run build` (you can also use `npm run build:win`).
 - For signed uploads prefer a server-side signing endpoint; see the `examples/signing-server` snippet in this repo.
+  CI / releases
+
+- A GitHub Action builds and publishes a ZIP release asset when you push a **tag** like `v1.2.3` (see `.github/workflows/release.yml`).
+- Additionally, a draft release is automatically created on every push to `main` (see `.github/workflows/draft-release.yml`) — this is a convenience so you can inspect artifacts and promote a draft to a normal release when ready.
 
 ## Getting started
 

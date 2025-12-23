@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "test:e2e": "vitest",
-    "build": "esbuild src/main.ts --bundle --outfile=main.js --platform=browser --format=cjs --external:obsidian"
+    "build": "esbuild src/main.ts --bundle --outfile=main.js --platform=browser --format=cjs --external:obsidian",
+    "build:win": "cmd /c build.bat"
   },
   "description": "Image upload plugin for Obsidian (via Cloudinary)",
   "main": "main.js",
