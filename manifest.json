@@ -1,0 +1,11 @@
+{
+  "id": "obsidian-img_upload-plugin",
+  "name": "Cloud Image Uploader for Obsidian",
+  "version": "1.0.0",
+  "minAppVersion": "0.12.0",
+  "description": "Upload images directly to Cloudinary from Obsidian",
+  "author": "Laurent Ongaro",
+  "authorUrl": "https://github.com/LaurentOngaro/F_obsidian-upload-plugin",
+  "fundingUrl": "https://www.patreon.com/posts/how-to-help-me-116311776",
+  "isDesktopOnly": false
+}

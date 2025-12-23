@@ -1,0 +1,28 @@
+{
+  "name": "obsidian-img_upload-plugin",
+  "version": "1.0.0",
+  "scripts": {
+    "test:e2e": "vitest",
+    "build": "esbuild src/main.ts --bundle --outfile=main.js --platform=browser --format=cjs --external:obsidian"
+  },
+  "description": "Image upload plugin for Obsidian (via Cloudinary)",
+  "main": "main.js",
+  "types": "main.d.ts",
+  "base": "./",
+  "build": {
+    "target": "ES6",
+    "minify": false,
+    "sourcemap": "inline"
+  },
+  "devDependencies": {
+    "@types/node": "16.11.6",
+    "@typescript-eslint/eslint-plugin": "5.2.0",
+    "@typescript-eslint/parser": "5.2.0",
+    "builtin-modules": "3.2.0",
+    "esbuild": "0.13.12",
+    "obsidian": "latest",
+    "tslib": "2.4.0",
+    "typescript": "4.7.4",
+    "vitest": "^0.34.6"
+  }
+}

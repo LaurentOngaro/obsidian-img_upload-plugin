@@ -1,0 +1,47 @@
+# Intellij
+*.iml
+.idea
+
+# npm
+node_modules
+
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# build
+main.js
+*.js.map
+
+# eslint
+.eslintcache
+
+# c8
+coverage/
+
+test-results.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Editors
+.vscode/
+
+# Build outputs
+dist/
+build/
+
+# Obsidian workspace
+.obsidian/workspace
+
+# Misc caches
+.cache/
+.parcel-cache/
+
+# settings (content credentials)
+data.json
