@@ -1,6 +1,6 @@
 # Cloud Image Uploader for Obsidian
 
-[![Release](https://img.shields.io/github/v/release/LaurentOngaro/obsidian-img_upload-plugin?sort=semver)](https://github.com/LaurentOngaro/obsidian-img_upload-plugin/releases)
+[![Release](https://img.shields.io/github/v/release/LaurentOngaro/obsidian-img_upload-plugin?sort=semver)](https://github.com/LaurentOngaro/obsidian-img_upload-plugin/releases) [![Latest release](https://img.shields.io/github/v/release/LaurentOngaro/obsidian-img_upload-plugin?label=latest%20release&sort=semver)](https://github.com/LaurentOngaro/obsidian-img_upload-plugin/releases)
 
 This plugin uploads images to [Cloudinary](https://cloudinary.com/) instead of just storing them locally in your vault.
 

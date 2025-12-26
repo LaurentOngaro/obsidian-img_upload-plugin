@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Run tests
+        run: npm run test:e2e -- --run
+
       - name: Build plugin
         run: npm run build
 
@@ -30,15 +33,23 @@ jobs:
           TAG=${GITHUB_REF#refs/tags/}
           zip -r "release/obsidian-img_upload-plugin-${TAG}.zip" main.js manifest.json README.md LICENSE package.json
 
-      - name: Create Release
+      - name: Create Release (via REST)
         id: create_release
-        uses: actions/create-release@v1
+        uses: actions/github-script@v6
         with:
-          tag_name: ${{ github.ref_name }}
-          release_name: ${{ github.ref_name }}
-          body: 'Automated release from CI'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const tag = process.env.GITHUB_REF_NAME || context.ref_name || '${{ github.ref_name }}';
+            const res = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: tag,
+              body: 'Automated release from CI',
+              draft: false,
+            });
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `upload_url=${res.data.upload_url}\n`);
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1

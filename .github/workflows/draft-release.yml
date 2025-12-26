@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Run tests
+        run: npm run test:e2e -- --run
+
       - name: Build plugin
         run: npm run build
 
@@ -31,20 +34,24 @@ jobs:
           TAG=draft-${{ github.run_number }}-${{ github.sha }}
           zip -r "release/obsidian-img_upload-plugin-${TAG}.zip" main.js manifest.json README.md LICENSE package.json
 
-      - name: Create draft release
+      - name: Create draft release (via REST)
         id: create_release
-        uses: actions/create-release@v1
+        uses: actions/github-script@v6
         with:
-          tag_name: draft-${{ github.run_number }}-${{ github.sha }}
-          release_name: 'Draft release for main (run #${{ github.run_number }})'
-          body: |
-            Draft release created automatically for push to `main`.
-
-            Commit: `${{ github.sha }}`
-            Branch: `${{ github.ref }}`
-          draft: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const tag = `draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}`;
+            const res = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Draft release for main (run #${process.env.GITHUB_RUN_NUMBER})`,
+              body: `Draft release created automatically for push to main.\n\nCommit: ${process.env.GITHUB_SHA}\nBranch: ${context.ref}`,
+              draft: true,
+            });
+            // Write upload_url to GITHUB_OUTPUT to expose as step output without using deprecated set-output
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `upload_url=${res.data.upload_url}\n`);
 
       - name: Upload draft release asset
         uses: actions/upload-release-asset@v1
