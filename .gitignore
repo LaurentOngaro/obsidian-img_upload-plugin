@@ -5,7 +5,7 @@
 # npm
 node_modules
 
-package-lock.json
+# package-lock.json # must be commtted if using npm
 pnpm-lock.yaml
 yarn.lock
 
