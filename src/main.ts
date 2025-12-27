@@ -236,7 +236,11 @@ class CloudinarySettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Signed uploads (dangerous)')
       .setDesc('Enable "Allow storing API Secret" only if you understand the security implications. Prefer unsigned presets or server-side signing.')
-      .addButton((btn: any) => btn.setButtonText('Learn more').onClick(()=>{ new (CloudinaryHelpModal as any)(this.app).open(); }));
+      .addButton((btn: any) =>
+        btn.setButtonText('Learn more').onClick(() => {
+          new (CloudinaryHelpModal as any)(this.app).open();
+        })
+      );
 
     new Setting(containerEl)
       .setName('Upload preset (Optional)')
@@ -351,7 +355,6 @@ class CloudinarySettingTab extends PluginSettingTab {
       // eslint-disable-next-line no-new
       new (CloudinaryHelpModal as any)(this.app).open();
     });
-
 
     // Status indicator element
     const statusRow = containerEl.createDiv({ cls: 'setting-item' });
