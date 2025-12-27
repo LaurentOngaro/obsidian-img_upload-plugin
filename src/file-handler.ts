@@ -14,6 +14,11 @@ export function resetAutoUploadWarnings() {
   shownMissingAutoUploadWarning = false;
   shownInvalidUploadPresetWarning = false;
   pluginCreatedFiles.clear();
+  try {
+    (processFileCreate as any).uploadingPaths = new Set<string>();
+  } catch (e) {
+    // noop
+  }
 }
 
 /**
@@ -30,9 +35,10 @@ export async function processFileCreate(
   settings: any,
   file: any,
   uploaderCtor: any = CloudinaryUploader,
-  options: { notify?: (msg: string) => void } = {}
+  options: { notify?: (msg: string) => void; saveSettings?: (s?: any) => Promise<void> } = {}
 ) {
   const notify = options.notify ?? (() => {});
+  const saveSettings = options.saveSettings ?? (async () => {});
 
   if (settings?.debugLogs) console.log('[img_upload] processFileCreate called', { file, settings });
 
@@ -51,9 +57,30 @@ export async function processFileCreate(
   const sizeBytes = (data as any)?.byteLength ?? (data as any)?.length ?? 0;
   if (settings?.debugLogs) console.log('[img_upload] file size bytes:', sizeBytes, 'maxMB:', settings.maxAutoUploadSizeMB);
 
+  // Helper: compute SHA-1 of binary data
+  async function computeSha1(buf: Uint8Array): Promise<string> {
+    if (typeof crypto !== 'undefined' && (crypto as any).subtle) {
+      const hashed = await (crypto as any).subtle.digest('SHA-1', buf);
+      return Array.from(new Uint8Array(hashed)).map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+    try {
+      const nodeCrypto = await import('crypto');
+      // Type casting to any to satisfy TypeScript typing for Buffer
+      return (nodeCrypto as any).createHash('sha1').update(buf as any).digest('hex');
+    } catch (e) {
+      throw new Error('No SHA-1 implementation available');
+    }
+  }
+
   // Ignore files the plugin just created to avoid infinite loops where a copied file triggers another copy/upload
   if (pluginCreatedFiles.has(file.path)) {
     if (settings?.debugLogs) console.log('[img_upload] skipping: file created by plugin itself', file.path);
+    return;
+  }
+
+  // In-flight guard to avoid concurrent uploads of the same path
+  if ((processFileCreate as any).uploadingPaths?.has(file.path)) {
+    if (settings?.debugLogs) console.log('[img_upload] skipping: upload already in progress for', file.path);
     return;
   }
 
@@ -82,32 +109,55 @@ export async function processFileCreate(
       const activeView = app.workspace.getActiveViewOfType?.(null) as any;
       const hasOpenNotes = leaves.length > 0 || (!!activeView && activeView.editor);
 
-      if (hasOpenNotes) {
-        let referenced = false;
-        for (const leaf of leaves) {
-          const view = (leaf.view as any);
-          if (view && view.editor) {
-            const content = view.editor.getValue() || '';
-            if (content.includes(file.path) || content.includes(file.name)) {
-              referenced = true;
-              break;
-            }
+      // Strict behavior: require the file to be referenced in an open note (or the active editor).
+      // If there are no open notes or the file is not referenced, do not attempt auto-upload.
+      if (!hasOpenNotes) {
+        if (settings?.debugLogs) console.log('[img_upload] skipping upload: no open notes present to reference file', file.path);
+        return;
+      }
+
+      let referenced = false;
+      for (const leaf of leaves) {
+        const view = leaf.view as any;
+        if (view && view.editor) {
+          const content = view.editor.getValue() || '';
+          if (content.includes(file.path) || content.includes(file.name)) {
+            referenced = true;
+            break;
           }
         }
+      }
 
-        // Also check the active view just in case
-        if (!referenced && activeView && activeView.editor) {
-          const content = activeView.editor.getValue() || '';
-          if (content.includes(file.path) || content.includes(file.name)) referenced = true;
-        }
+      // Also check the active view just in case
+      if (!referenced && activeView && activeView.editor) {
+        const content = activeView.editor.getValue() || '';
+        if (content.includes(file.path) || content.includes(file.name)) referenced = true;
+      }
 
-        if (!referenced) {
-          if (settings?.debugLogs) console.log('[img_upload] skipping upload: file not referenced in open notes or active editor', file.path);
-          return;
+      if (!referenced) {
+        if (settings?.debugLogs) console.log('[img_upload] skipping upload: file not referenced in open notes or active editor', file.path);
+        return;
+      }
+
+      // Compute file hash and check persistent cache of uploaded files
+      const hash = await computeSha1(data as Uint8Array);
+      if (!settings.uploadedFiles) settings.uploadedFiles = {};
+      const cached = settings.uploadedFiles[file.path];
+      if (cached && cached.hash === hash && cached.url) {
+        if (settings?.debugLogs) console.log('[img_upload] using cached upload for', file.path, cached.url);
+        // Replace local reference in active editor if present
+        const view = app.workspace.getActiveViewOfType?.(null) as any;
+        if (view && view.editor) {
+          const content = view.editor.getValue();
+          const esc = escapeRegExp(file.path);
+          const imageRegex = new RegExp(`!\\[([^\\]]*)\\](${esc})`, 'g');
+          if (imageRegex.test(content)) {
+            const newContent = content.replace(imageRegex, `![$1](${cached.url})`);
+            view.editor.setValue(newContent);
+            notify('🔁 Replaced local image reference with cached Cloudinary URL in the current editor.');
+          }
         }
-      } else {
-        // No open notes (e.g., user added files while not viewing notes): proceed with upload
-        if (settings?.debugLogs) console.log('[img_upload] no open notes found; proceeding with upload for', file.path);
+        return { cachedUrl: cached.url };
       }
     } catch (e) {
       if (settings?.debugLogs) console.error('[img_upload] reference check error', e);
@@ -161,6 +211,10 @@ export async function processFileCreate(
     }
 
     concurrentUploads++;
+    // mark in-flight
+    (processFileCreate as any).uploadingPaths = (processFileCreate as any).uploadingPaths || new Set<string>();
+    (processFileCreate as any).uploadingPaths.add(file.path);
+
     try {
       const uploader = new uploaderCtor({
         cloud_name: settings.cloudName,
@@ -173,6 +227,21 @@ export async function processFileCreate(
       const url = await uploader.upload(blob, file.name);
       if (settings?.debugLogs) console.log('[img_upload] upload success', url);
       notify(`✅ Image uploaded: ${url}`);
+
+      // Persist cache: compute hash and store mapping (in-memory + persist if saveSettings provided)
+      try {
+        const hashAfter = await computeSha1(data as Uint8Array);
+        settings.uploadedFiles = settings.uploadedFiles || {};
+        settings.uploadedFiles[file.path] = { url, hash: hashAfter, updatedAt: Date.now() } as any;
+        try {
+          await saveSettings(settings);
+        } catch (e) {
+          if (settings?.debugLogs) console.error('[img_upload] saveSettings failed', e);
+        }
+      } catch (e) {
+        if (settings?.debugLogs) console.error('[img_upload] compute hash for cache failed', e);
+      }
+
       // After successful upload, perform local copy if enabled
       if (settings.localCopyEnabled && settings.localCopyFolder) {
         try {
@@ -239,6 +308,11 @@ export async function processFileCreate(
       return;
     } finally {
       concurrentUploads--;
+      try {
+        (processFileCreate as any).uploadingPaths?.delete(file.path);
+      } catch (err) {
+        /* ignore */
+      }
     }
   }
 

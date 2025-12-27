@@ -8,4 +8,10 @@ describe('Settings UI strings', () => {
     expect(src).toMatch(/Create unsigned preset \(auto\)/);
     expect(src).not.toMatch(/Create preset \(auto\)/);
   });
+
+  it('has maintenance buttons to clear and export upload cache', () => {
+    const src = readFileSync(resolve(__dirname, '../../src/main.ts'), 'utf8');
+    expect(src).toMatch(/Clear upload cache/);
+    expect(src).toMatch(/Export upload cache/);
+  });
 });

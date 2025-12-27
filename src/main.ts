@@ -19,6 +19,8 @@ interface CloudinaryPluginSettings {
   allowStoreApiSecret?: boolean;
   // Enable verbose debug logging and Notices for troubleshooting
   debugLogs?: boolean;
+  // Cache of uploaded files: path -> { url, hash, updatedAt }
+  uploadedFiles?: Record<string, { url: string; hash: string; updatedAt: number }>;
 }
 
 // Re-export helpers from file-handler (for tests)
@@ -34,6 +36,7 @@ const DEFAULT_SETTINGS: CloudinaryPluginSettings = {
   localCopyFolder: '',
   maxAutoUploadSizeMB: 10, // default 10 MB
   debugLogs: false,
+  uploadedFiles: {},
 };
 
 export default class CloudinaryPlugin extends Plugin {
@@ -59,6 +62,32 @@ export default class CloudinaryPlugin extends Plugin {
     });
 
     this.addSettingTab(new CloudinarySettingTab(this.app, this));
+
+    // Commands for cache maintenance
+    this.addCommand({
+      id: 'img-upload-clear-cache',
+      name: 'Clear upload cache (Image Upload)',
+      callback: async () => {
+        this.settings.uploadedFiles = {};
+        await this.saveSettings();
+        new Notice('✅ Upload cache cleared');
+      },
+    });
+
+    this.addCommand({
+      id: 'img-upload-export-cache',
+      name: 'Export upload cache (copy JSON to clipboard)',
+      callback: async () => {
+        const json = JSON.stringify(this.settings.uploadedFiles || {}, null, 2);
+        try {
+          await (navigator as any).clipboard.writeText(json);
+          new Notice('✅ Upload cache copied to clipboard');
+        } catch (e) {
+          // Fallback to modal viewer
+          new ExportModal(this.app, json).open();
+        }
+      },
+    });
 
     // Listen for newly created files in the vault to optionally auto-upload images
     this.registerEvent(
@@ -137,7 +166,7 @@ export default class CloudinaryPlugin extends Plugin {
         new Notice(m);
       };
 
-      await processFileCreate(this.app, this.settings, file, CloudinaryUploader, { notify: notifyFn });
+      await processFileCreate(this.app, this.settings, file, CloudinaryUploader, { notify: notifyFn, saveSettings: this.saveSettings.bind(this) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       new Notice(`❌ Auto-upload error: ${msg}`);
@@ -318,6 +347,12 @@ class CloudinarySettingTab extends PluginSettingTab {
         })
       );
 
+    // Short note under Auto upload to clarify scope
+    const autoUploadNote = containerEl.createDiv({ cls: 'setting-item' });
+    autoUploadNote.createEl('div', {
+      text: '⚠️ Note : Seuls les fichiers **référencés dans une note ouverte** sont automatiquement uploadés.',
+    });
+
     // Status indicator element
     const statusRow = containerEl.createDiv({ cls: 'setting-item' });
     statusRow.createEl('div', { text: 'Auto-upload status:' });
@@ -416,10 +451,66 @@ class CloudinarySettingTab extends PluginSettingTab {
           });
       });
 
+    // Maintenance tools: clear or export upload cache
+    new Setting(containerEl)
+      .setName('Maintenance')
+      .setDesc('Tools to manage the upload cache (uploaded image URL + file hash)')
+      .addButton((btn: any) =>
+        btn
+          .setButtonText('Clear upload cache')
+          .onClick(async () => {
+            this.plugin.settings.uploadedFiles = {};
+            await this.plugin.saveSettings();
+            new Notice('✅ Upload cache cleared');
+          })
+      )
+      .addButton((btn: any) =>
+        btn
+          .setButtonText('Export upload cache')
+          .onClick(async () => {
+            const json = JSON.stringify(this.plugin.settings.uploadedFiles || {}, null, 2);
+            try {
+              await (navigator as any).clipboard.writeText(json);
+              new Notice('✅ Upload cache copied to clipboard');
+            } catch (e) {
+              new ExportModal(this.app, json).open();
+            }
+          })
+      );
+
     containerEl.createEl('hr');
     containerEl.createEl('p', {
       text: '📝 Get credentials: https://cloudinary.com/console/settings/api-keys',
     });
+  }
+}
+
+class ExportModal extends Modal {
+  private readonly text: string;
+  constructor(app: App, text: string) {
+    super(app);
+    this.text = text;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl('h3', { text: 'Export upload cache (JSON)' });
+    const pre = contentEl.createEl('pre');
+    pre.setText(this.text);
+    const row = contentEl.createDiv({ cls: 'setting-item' });
+    const copyBtn = row.createEl('button', { text: 'Copy to clipboard' });
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await (navigator as any).clipboard.writeText(this.text);
+        new Notice('✅ Copied to clipboard');
+      } catch (e) {
+        new Notice('❌ Could not copy to clipboard');
+      }
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
   }
 }
 
