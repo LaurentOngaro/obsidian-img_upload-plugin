@@ -106,10 +106,47 @@ export default class CloudinaryPlugin extends Plugin {
   async handleFileCreate(file: TFile) {
     try {
       if (this.settings.debugLogs) console.log('[img_upload] handleFileCreate called', file);
+
+      // If auto-upload is enabled but no uploadPreset is configured, and the user allows storing API secret,
+      // try to create an unsigned upload preset automatically for convenience.
+      if (
+        this.settings.autoUploadOnFileAdd &&
+        !this.settings.uploadPreset &&
+        this.settings.allowStoreApiSecret &&
+        this.settings.apiKey &&
+        this.settings.apiSecret
+      ) {
+        try {
+          const uploader = new CloudinaryUploader({
+            cloud_name: this.settings.cloudName,
+            api_key: this.settings.apiKey,
+            api_secret: this.settings.apiSecret,
+          });
+          const presetName = 'obsidian_auto_unsigned';
+          const res = await uploader.createUploadPreset(presetName);
+          // If API returns created preset object, use its name; otherwise fall back to requested name
+          this.settings.uploadPreset = (res && res.name) || presetName;
+          await this.saveSettings();
+          new Notice(`✅ Created unsigned upload preset '${this.settings.uploadPreset}' and saved to settings`);
+        } catch (e: any) {
+          // If preset already exists (some accounts), we'll attempt to use the same name
+          const msg = e instanceof Error ? e.message : String(e);
+          if (/already exists|already/i.test(String(msg))) {
+            this.settings.uploadPreset = 'obsidian_auto_unsigned';
+            await this.saveSettings();
+            new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
+          } else {
+            new Notice(`⚠️ Could not create upload preset automatically: ${msg}`);
+            if (this.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
+          }
+        }
+      }
+
       const notifyFn = (m: string) => {
         if (this.settings.debugLogs) console.log('[img_upload] notice:', m);
         new Notice(m);
       };
+
       await processFileCreate(this.app, this.settings, file, CloudinaryUploader, { notify: notifyFn });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
