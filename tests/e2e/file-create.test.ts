@@ -44,7 +44,7 @@ describe('processFileCreate', () => {
       upload = vi.fn().mockResolvedValue(url);
     }
 
-    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', maxAutoUploadSizeMB: 2 };
+    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', maxAutoUploadSizeMB: 2 };
 
     const result: any = await processFileCreate(app, settings, file as any, MockUploader as any);
 
@@ -96,7 +96,7 @@ describe('processFileCreate', () => {
       upload = vi.fn().mockResolvedValue(url);
     }
 
-    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', maxAutoUploadSizeMB: 2, debugLogs: true };
+    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', maxAutoUploadSizeMB: 2, debugLogs: true };
 
     const spy = vi.spyOn(console, 'log');
 

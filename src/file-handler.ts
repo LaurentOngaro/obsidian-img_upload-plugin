@@ -46,7 +46,15 @@ export async function processFileCreate(
     }
   }
 
-  if (settings.autoUploadOnFileAdd && settings.cloudName && (settings.apiKey || settings.uploadPreset)) {
+  // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
+  if (settings.autoUploadOnFileAdd && settings.cloudName) {
+    const canUnsigned = !!settings.uploadPreset;
+    const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
+    if (!canUnsigned && !canSigned) {
+      if (settings?.debugLogs) console.error('[img_upload] auto-upload skipped: missing upload_preset and API secret for signed uploads');
+      notify('⚠️ Auto-upload skipped: configure an Upload preset (for unsigned uploads) or enable & set API Secret (for signed uploads) in plugin settings.');
+      return;
+    }
     const maxMB = settings.maxAutoUploadSizeMB ?? 0;
     if (maxMB > 0 && sizeBytes > maxMB * 1024 * 1024) {
       if (settings?.debugLogs) console.log('[img_upload] skipping upload: exceeds size limit', { sizeBytes, maxMB });

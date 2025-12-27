@@ -248,6 +248,10 @@ class CloudinarySettingTab extends PluginSettingTab {
         toggle.setValue(!!this.plugin.settings.autoUploadOnFileAdd).onChange(async (value: boolean) => {
           this.plugin.settings.autoUploadOnFileAdd = value;
           await this.plugin.saveSettings();
+          // Warn user when enabling Auto Upload but neither upload preset nor signed credentials are configured
+          if (value && !this.plugin.settings.uploadPreset && !(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiSecret)) {
+            new Notice('⚠️ Auto upload enabled but no Upload preset or API Secret configured. Uploads will fail unless you add an upload preset or set an API Secret.');
+          }
         })
       );
 
