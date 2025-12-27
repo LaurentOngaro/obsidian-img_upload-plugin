@@ -16,6 +16,8 @@ interface CloudinaryPluginSettings {
   maxAutoUploadSizeMB?: number;
   // Whether storing API secret locally is allowed (dangerous)
   allowStoreApiSecret?: boolean;
+  // Enable verbose debug logging and Notices for troubleshooting
+  debugLogs?: boolean;
 }
 
 // Re-export helpers from file-handler (for tests)
