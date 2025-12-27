@@ -194,6 +194,9 @@ class CloudinarySettingTab extends PluginSettingTab {
           })
       );
 
+    // Signed uploads section
+    containerEl.createEl('h3', { text: '🔐 Signed uploads (dangerous)' });
+
     // Toggle: allow storing API Secret (dangerous)
     new Setting(containerEl)
       .setName('Allow storing API Secret (dangerous)')
@@ -234,17 +237,10 @@ class CloudinarySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName('Signed uploads (dangerous)')
-      .setDesc('Enable "Allow storing API Secret" only if you understand the security implications. Prefer unsigned presets or server-side signing.')
-      .addButton((btn: any) =>
-        btn.setButtonText('Learn more').onClick(() => {
-          new (CloudinaryHelpModal as any)(this.app).open();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName('Upload preset (Optional)')
-      .setDesc('Use upload preset for unsigned uploads (recommended instead of exposing secret)')
+      .setName('Upload preset (recommended)')
+      .setDesc(
+        'Use an unsigned upload preset for unsigned uploads (recommended) or a signed upload preset (you must provide your API Secret) or use a server-side signer. If the plugin cannot create a preset due to CORS, create it manually in the Cloudinary Console or use the example server (Help).'
+      )
       .addText((text: any) =>
         text
           .setPlaceholder('my_unsigned_preset')
@@ -287,38 +283,23 @@ class CloudinarySettingTab extends PluginSettingTab {
           })
       );
 
-    // Clarify unsigned vs signed uploads for users
-    new Setting(containerEl)
-      .setName('Unsigned uploads (recommended)')
-      .setDesc('Use an unsigned upload preset to enable auto-upload without exposing your API Secret. Prefer this option for safety.')
-      .addButton((btn: any) =>
-        btn.setButtonText('Learn more').onClick(() => {
-          // Open the help modal
-          // eslint-disable-next-line no-new
-          new (CloudinaryHelpModal as any)(this.app).open();
-        })
-      );
-
-    // Max auto-upload size
-    new Setting(containerEl)
-      .setName('Max auto-upload size (MB)')
-      .setDesc('Maximum file size (in MB) allowed for automatic uploads. Files larger will not be uploaded automatically.')
-      .addText((text: any) =>
-        text
-          .setPlaceholder('10')
-          .setValue(String(this.plugin.settings.maxAutoUploadSizeMB ?? 10))
-          .onChange(async (value: string) => {
-            const num = Number(value);
-            if (!isFinite(num) || num <= 0) {
-              new Notice('Please enter a positive number for max upload size (MB)');
-              return;
-            }
-            this.plugin.settings.maxAutoUploadSizeMB = num;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    // -- Auto-upload & local copy settings
+    // Merged tip under Upload preset: explains unsigned vs signed and provides Help / example server options
+    const presetHelp = containerEl.createDiv({ cls: 'setting-item' });
+    presetHelp.createEl('div', {
+      text: 'An unsigned Upload preset is required for unsigned uploads (recommended for safety). If the plugin cannot create the preset due to CORS, create it via the Cloudinary Console or use the example server (Help). If you prefer not to use an unsigned preset, you must enable signed uploads or configure a server-side signer.',
+    });
+    const presetHelpRow = presetHelp.createDiv({ cls: 'setting-item-control' });
+    const helpBtn2 = presetHelpRow.createEl('button', { text: 'Learn More' });
+    helpBtn2.addEventListener('click', () => {
+      // eslint-disable-next-line no-new
+      new (CloudinaryHelpModal as any)(this.app).open();
+    });
+    presetHelpRow.createEl('span', { text: ' ' });
+    const serverBtn2 = presetHelpRow.createEl('button', { text: 'Create via example server' });
+    serverBtn2.addEventListener('click', () => {
+      // eslint-disable-next-line no-new
+      new (CloudinaryHelpModal as any)(this.app).open();
+    });
 
     // -- Auto-upload & local copy settings
     new Setting(containerEl)
@@ -336,25 +317,6 @@ class CloudinarySettingTab extends PluginSettingTab {
           }
         })
       );
-
-    // Inline help for Auto-upload (help link that opens a modal + create preset button)
-    const autoHelp = containerEl.createDiv({ cls: 'setting-item' });
-    autoHelp.createEl('div', { text: 'Tip: You need an unsigned Upload preset (or signed uploads) for auto-upload to work.' });
-    const helpRow = autoHelp.createDiv({ cls: 'setting-item-control' });
-    const linkBtn = helpRow.createEl('button', { text: 'Help' });
-    linkBtn.addEventListener('click', () => {
-      // Open the help modal
-      // CloudinaryHelpModal is defined below
-      // eslint-disable-next-line no-new
-      new (CloudinaryHelpModal as any)(this.app).open();
-    });
-    helpRow.createEl('span', { text: ' ' });
-    const serverBtn = helpRow.createEl('button', { text: 'Create via example server' });
-    serverBtn.addEventListener('click', () => {
-      // Open help modal which contains the example server guidance
-      // eslint-disable-next-line no-new
-      new (CloudinaryHelpModal as any)(this.app).open();
-    });
 
     // Status indicator element
     const statusRow = containerEl.createDiv({ cls: 'setting-item' });
@@ -398,6 +360,25 @@ class CloudinarySettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           new Notice(`Debug logs ${value ? 'enabled' : 'disabled'}`);
         })
+      );
+
+    // Max auto-upload size
+    new Setting(containerEl)
+      .setName('Max auto-upload size (MB)')
+      .setDesc('Maximum file size (in MB) allowed for automatic uploads. Files larger will not be uploaded automatically.')
+      .addText((text: any) =>
+        text
+          .setPlaceholder('10')
+          .setValue(String(this.plugin.settings.maxAutoUploadSizeMB ?? 10))
+          .onChange(async (value: string) => {
+            const num = Number(value);
+            if (!isFinite(num) || num <= 0) {
+              new Notice('Please enter a positive number for max upload size (MB)');
+              return;
+            }
+            this.plugin.settings.maxAutoUploadSizeMB = num;
+            await this.plugin.saveSettings();
+          })
       );
 
     let folderText: any;

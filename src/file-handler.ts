@@ -2,12 +2,27 @@ import { CloudinaryUploader } from './cloudinary';
 
 // Track warnings shown per runtime session to avoid spamming the user on startup
 let shownMissingAutoUploadWarning = false;
+let shownInvalidUploadPresetWarning = false;
+
+// Track files the plugin created during this session to avoid re-processing them
+const pluginCreatedFiles = new Set<string>();
 
 /**
  * Reset warning flags (useful for tests)
  */
 export function resetAutoUploadWarnings() {
   shownMissingAutoUploadWarning = false;
+  shownInvalidUploadPresetWarning = false;
+  pluginCreatedFiles.clear();
+}
+
+/**
+ * Mark a path as created by the plugin for a short window so the create handler ignores it.
+ */
+export function markPluginCreatedPath(path: string) {
+  pluginCreatedFiles.add(path);
+  // Remove after 30s to avoid memory growth and to only ignore immediate re-creates
+  setTimeout(() => pluginCreatedFiles.delete(path), 30 * 1000);
 }
 
 export async function processFileCreate(
@@ -36,11 +51,68 @@ export async function processFileCreate(
   const sizeBytes = (data as any)?.byteLength ?? (data as any)?.length ?? 0;
   if (settings?.debugLogs) console.log('[img_upload] file size bytes:', sizeBytes, 'maxMB:', settings.maxAutoUploadSizeMB);
 
+  // Ignore files the plugin just created to avoid infinite loops where a copied file triggers another copy/upload
+  if (pluginCreatedFiles.has(file.path)) {
+    if (settings?.debugLogs) console.log('[img_upload] skipping: file created by plugin itself', file.path);
+    return;
+  }
+
+  // If a local copy folder is configured, skip files created inside that folder (we don't want to act on our own copies)
+  if (settings.localCopyEnabled && settings.localCopyFolder) {
+    try {
+      const folder = sanitizeFolderPath(settings.localCopyFolder);
+      if (folder && file.path.startsWith(`${folder}/`)) {
+        if (settings?.debugLogs) console.log('[img_upload] skipping: file is inside localCopyFolder', file.path);
+        return;
+      }
+    } catch (e) {
+      // invalid folder path will be handled later when attempting to write, ignore here
+    }
+  }
+
   // Local copy will be performed after a successful upload. If auto-upload is disabled we'll perform the copy later in the function.
 
   // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
   // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
   if (settings.autoUploadOnFileAdd && settings.cloudName) {
+    // Only attempt auto-upload for files that are referenced in an open note or the active editor. This keeps uploads scoped to
+    // files you're actually editing or adding to notes (prevents mass uploads during vault indexing).
+    try {
+      const leaves = (app.workspace.getLeavesOfType && app.workspace.getLeavesOfType('markdown')) || [];
+      const activeView = app.workspace.getActiveViewOfType?.(null) as any;
+      const hasOpenNotes = leaves.length > 0 || (!!activeView && activeView.editor);
+
+      if (hasOpenNotes) {
+        let referenced = false;
+        for (const leaf of leaves) {
+          const view = (leaf.view as any);
+          if (view && view.editor) {
+            const content = view.editor.getValue() || '';
+            if (content.includes(file.path) || content.includes(file.name)) {
+              referenced = true;
+              break;
+            }
+          }
+        }
+
+        // Also check the active view just in case
+        if (!referenced && activeView && activeView.editor) {
+          const content = activeView.editor.getValue() || '';
+          if (content.includes(file.path) || content.includes(file.name)) referenced = true;
+        }
+
+        if (!referenced) {
+          if (settings?.debugLogs) console.log('[img_upload] skipping upload: file not referenced in open notes or active editor', file.path);
+          return;
+        }
+      } else {
+        // No open notes (e.g., user added files while not viewing notes): proceed with upload
+        if (settings?.debugLogs) console.log('[img_upload] no open notes found; proceeding with upload for', file.path);
+      }
+    } catch (e) {
+      if (settings?.debugLogs) console.error('[img_upload] reference check error', e);
+      // If reference check fails for any reason, do not block auto-upload; fall through to existing checks
+    }
     const canUnsigned = !!settings.uploadPreset;
     const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
     if (!canUnsigned && !canSigned) {
@@ -114,6 +186,14 @@ export async function processFileCreate(
             finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
           }
 
+          // Mark the path as created by the plugin before creating it to avoid our create handler re-processing this file
+          try {
+            markPluginCreatedPath(finalPath);
+          } catch (err) {
+            // best-effort; ignore errors in marking
+            if (settings?.debugLogs) console.error('[img_upload] markPluginCreatedPath error', err);
+          }
+
           await app.vault.createBinary(finalPath, data as any);
           if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
           notify(`✅ Copied image to ${finalPath}`);
@@ -141,9 +221,16 @@ export async function processFileCreate(
 
       // Common Cloudinary guidance
       if (typeof message === 'string' && /upload preset|unsigned/i.test(message)) {
-        notify(
-          '❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).'
-        );
+        // Show this guidance only once per session to avoid repeated notices when a preset exists but is not
+        // configured for unsigned uploads (Cloudinary returns 400 for each attempted file upload).
+        if (!shownInvalidUploadPresetWarning) {
+          shownInvalidUploadPresetWarning = true;
+          notify(
+            '❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).'
+          );
+        } else if (settings?.debugLogs) {
+          console.error('[img_upload] upload error (invalid preset) - repeated error suppressed', e);
+        }
       } else if (typeof message === 'string' && /signature|api_secret/i.test(message)) {
         notify('❌ Upload failed: signature error. Verify API Key/API Secret and signing configuration.');
       } else {
