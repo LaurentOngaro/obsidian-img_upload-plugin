@@ -15,6 +15,9 @@ main.js
 build-info.json
 VERSION
 
+# Generated build-time TypeScript file
+src/generated-build-info.ts
+
 # eslint
 .eslintcache
 
