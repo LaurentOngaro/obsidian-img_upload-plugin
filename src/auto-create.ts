@@ -41,7 +41,14 @@ export async function tryAutoCreatePresetOnce(
     const msg = e instanceof Error ? e.message : String(e);
     if (!shownAutoCreatePresetWarning) {
       shownAutoCreatePresetWarning = true;
-      notify(`⚠️ Could not auto-create upload preset: ${msg}`);
+      // Provide a clearer message when the failure looks like a network/CORS issue.
+      if (/failed to fetch|network|access-control-allow-origin/i.test(String(msg))) {
+        notify(
+          '⚠️ Could not auto-create upload preset: the Cloudinary management API appears blocked from your environment (CORS or network error).\nPlease create the unsigned upload preset in the Cloudinary Console or run a small server-side script to create it (see Help).'
+        );
+      } else {
+        notify(`⚠️ Could not auto-create upload preset: ${msg}`);
+      }
     }
     if (debugLogs) console.error('[img_upload] tryAutoCreatePresetOnce error', e);
     return undefined;

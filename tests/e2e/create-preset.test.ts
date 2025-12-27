@@ -102,4 +102,33 @@ describe('createUploadPreset flow', () => {
     // Cleanup
     spy.mockRestore();
   });
+
+  it('shows CORS guidance when createUploadPreset fails due to network/CORS', async () => {
+    // Reset auto-create state
+    const { resetAutoCreatePresetState } = await import('../../src/auto-create');
+    resetAutoCreatePresetState();
+
+    const settings: any = {
+      autoUploadOnFileAdd: true,
+      cloudName: 'demo',
+      apiKey: 'key',
+      apiSecret: 'secret',
+      allowStoreApiSecret: true,
+      uploadPreset: '',
+      debugLogs: false,
+    };
+
+    // Simulate a CORS-like failure (fetch throws TypeError 'Failed to fetch')
+    const spy = vi.spyOn(CloudinaryUploader.prototype as any, 'createUploadPreset').mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const notify = vi.fn();
+
+    const { tryAutoCreatePresetOnce } = await import('../../src/auto-create');
+    await tryAutoCreatePresetOnce(settings, CloudinaryUploader as any, async () => {}, notify, false);
+
+    expect(notify).toHaveBeenCalled();
+    expect(notify.mock.calls[0][0]).toEqual(expect.stringContaining('Cloudinary management API appears blocked'));
+
+    spy.mockRestore();
+  });
 });
