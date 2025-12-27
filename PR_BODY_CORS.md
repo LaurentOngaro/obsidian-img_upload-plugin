@@ -5,4 +5,5 @@ Adds a short CORS troubleshooting section explaining that Cloudinary management 
 - Adds a small unit test `tests/unit/readme.test.ts` to assert the README contains the guidance.
 
 Local validation:
+
 - Ran `npm run ci:checks` locally — all tests passed and build succeeds.

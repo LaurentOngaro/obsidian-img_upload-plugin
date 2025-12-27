@@ -234,6 +234,11 @@ class CloudinarySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
+      .setName('Signed uploads (dangerous)')
+      .setDesc('Enable "Allow storing API Secret" only if you understand the security implications. Prefer unsigned presets or server-side signing.')
+      .addButton((btn: any) => btn.setButtonText('Learn more').onClick(()=>{ new (CloudinaryHelpModal as any)(this.app).open(); }));
+
+    new Setting(containerEl)
       .setName('Upload preset (Optional)')
       .setDesc('Use upload preset for unsigned uploads (recommended instead of exposing secret)')
       .addText((text: any) =>
@@ -248,7 +253,7 @@ class CloudinarySettingTab extends PluginSettingTab {
       )
       .addButton((btn: any) =>
         btn
-          .setButtonText('Create preset (auto)')
+          .setButtonText('Create unsigned preset (auto)')
           .setDisabled(!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret))
           .onClick(async () => {
             try {
@@ -261,21 +266,33 @@ class CloudinarySettingTab extends PluginSettingTab {
               const res = await uploader.createUploadPreset(name);
               this.plugin.settings.uploadPreset = (res && res.name) || name;
               await this.plugin.saveSettings();
-              new Notice(`✅ Created upload preset '${this.plugin.settings.uploadPreset}'`);
+              new Notice(`✅ Created unsigned upload preset '${this.plugin.settings.uploadPreset}'`);
               updateStatusIndicator();
             } catch (e: any) {
               const msg = e instanceof Error ? e.message : String(e);
               if (/already exists|already/i.test(String(msg))) {
                 this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
                 await this.plugin.saveSettings();
-                new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
+                new Notice(`⚠️ Using existing unsigned upload preset 'obsidian_auto_unsigned'`);
                 updateStatusIndicator();
               } else {
-                new Notice(`❌ Could not create preset: ${msg}`);
+                new Notice(`❌ Could not create unsigned preset: ${msg}`);
                 if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
               }
             }
           })
+      );
+
+    // Clarify unsigned vs signed uploads for users
+    new Setting(containerEl)
+      .setName('Unsigned uploads (recommended)')
+      .setDesc('Use an unsigned upload preset to enable auto-upload without exposing your API Secret. Prefer this option for safety.')
+      .addButton((btn: any) =>
+        btn.setButtonText('Learn more').onClick(() => {
+          // Open the help modal
+          // eslint-disable-next-line no-new
+          new (CloudinaryHelpModal as any)(this.app).open();
+        })
       );
 
     // Max auto-upload size
@@ -328,49 +345,13 @@ class CloudinarySettingTab extends PluginSettingTab {
       new (CloudinaryHelpModal as any)(this.app).open();
     });
     helpRow.createEl('span', { text: ' ' });
-    const presetBtn = helpRow.createEl('button', { text: 'Create preset (auto)' });
-    presetBtn.addEventListener('click', async () => {
-      if (!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret)) {
-        new Notice('Enable and provide API Key & API Secret to auto-create a preset.');
-        return;
-      }
-      try {
-        const uploader = new CloudinaryUploader({
-          cloud_name: this.plugin.settings.cloudName,
-          api_key: this.plugin.settings.apiKey,
-          api_secret: this.plugin.settings.apiSecret,
-        });
-        const res = await uploader.createUploadPreset('obsidian_auto_unsigned');
-        this.plugin.settings.uploadPreset = (res && res.name) || 'obsidian_auto_unsigned';
-        await this.plugin.saveSettings();
-        new Notice(`✅ Created upload preset '${this.plugin.settings.uploadPreset}'`);
-        updateStatusIndicator();
-      } catch (e: any) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (/already exists|already/i.test(String(msg))) {
-          this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
-          await this.plugin.saveSettings();
-          new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
-          updateStatusIndicator();
-        } else {
-          // Detect common fetch/CORS failures and provide explicit guidance + open the help modal
-          if (/failed to fetch|network|access-control-allow-origin/i.test(String(msg))) {
-            new Notice(
-              '❌ Could not create preset: Cloudinary management API appears blocked by CORS or network error. Open Help for manual instructions.'
-            );
-            // Open the help modal to guide the user
-            // eslint-disable-next-line no-new
-            new (CloudinaryHelpModal as any)(this.app).open();
-          } else {
-            new Notice(`❌ Could not create preset: ${msg}`);
-          }
-          if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
-        }
-      }
+    const serverBtn = helpRow.createEl('button', { text: 'Create via example server' });
+    serverBtn.addEventListener('click', () => {
+      // Open help modal which contains the example server guidance
+      // eslint-disable-next-line no-new
+      new (CloudinaryHelpModal as any)(this.app).open();
     });
-    // disable unless creds are available
-    if (!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret))
-      presetBtn.setAttribute('disabled', '');
+
 
     // Status indicator element
     const statusRow = containerEl.createDiv({ cls: 'setting-item' });
