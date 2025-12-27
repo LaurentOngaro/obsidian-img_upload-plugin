@@ -50,22 +50,25 @@ jobs:
               body: `Draft release created automatically for push to main.\n\nCommit: ${process.env.GITHUB_SHA}\nBranch: ${context.ref}`,
               draft: true,
             });
-            // Write upload_url to GITHUB_OUTPUT to expose as step output without using deprecated set-output
+            // Write upload_url and release_id to GITHUB_OUTPUT to expose as step outputs without using deprecated set-output
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `upload_url=${res.data.upload_url}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_id=${res.data.id}\n`);
 
-      - name: Upload draft release asset (via REST)
+      - name: Upload draft release asset (via REST using release id)
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            const path = require('path');
             const filePath = `release/obsidian-img_upload-plugin-draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}.zip`;
             const content = fs.readFileSync(filePath);
-            const uploadUrl = `${process.env.UPLOAD_URL || '${{ steps.create_release.outputs.upload_url }}'}`;
-            const parsed = uploadUrl.replace('{?name,label}','');
+            const releaseId = '${{ steps.create_release.outputs.release_id }}' || (await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag: `draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}` })).data.id;
             await github.rest.repos.uploadReleaseAsset({
-              url: parsed,
-              headers: { 'content-type': 'application/zip' },
-              name: `obsidian-img_upload-plugin-draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}.zip`,
-              data: content
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              name: path.basename(filePath),
+              data: content,
+              headers: { 'content-type': 'application/zip' }
             });

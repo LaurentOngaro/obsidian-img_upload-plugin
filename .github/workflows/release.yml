@@ -50,20 +50,23 @@ jobs:
               draft: false,
             });
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `upload_url=${res.data.upload_url}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_id=${res.data.id}\n`);
 
-      - name: Upload Release Asset (via REST)
+      - name: Upload Release Asset (via REST using release id)
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
+            const path = require('path');
             const filePath = `release/obsidian-img_upload-plugin-${process.env.GITHUB_REF_NAME || '${{ github.ref_name }}'}.zip`;
             const content = fs.readFileSync(filePath);
-            const uploadUrl = `${process.env.UPLOAD_URL || '${{ steps.create_release.outputs.upload_url }}'}`;
-            const parsed = uploadUrl.replace('{?name,label}','');
+            const releaseId = '${{ steps.create_release.outputs.release_id }}' || (await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag: process.env.GITHUB_REF_NAME || '${{ github.ref_name }}' })).data.id;
             await github.rest.repos.uploadReleaseAsset({
-              url: parsed,
-              headers: { 'content-type': 'application/zip' },
-              name: `obsidian-img_upload-plugin-${process.env.GITHUB_REF_NAME || '${{ github.ref_name }}'}.zip`,
-              data: content
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              name: path.basename(filePath),
+              data: content,
+              headers: { 'content-type': 'application/zip' }
             });
