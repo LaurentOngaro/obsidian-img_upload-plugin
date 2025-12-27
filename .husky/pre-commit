@@ -1,0 +1,21 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# Run project CI checks before allowing commit
+echo "Running pre-commit CI checks: tests + build"
+
+# Run tests (e2e) - fail commit if tests fail
+npm run test:e2e -- --run
+if [ $? -ne 0 ]; then
+  echo "Pre-commit: Tests failed — aborting commit."
+  exit 1
+fi
+
+# Run build - ensures the built artifact is consistent
+npm run build
+if [ $? -ne 0 ]; then
+  echo "Pre-commit: Build failed — aborting commit."
+  exit 1
+fi
+
+echo "Pre-commit checks passed."
