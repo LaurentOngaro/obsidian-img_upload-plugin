@@ -254,6 +254,35 @@ class CloudinarySettingTab extends PluginSettingTab {
             this.plugin.settings.uploadPreset = value;
             await this.plugin.saveSettings();
           })
+      )
+      .addButton((btn: any) =>
+        btn
+          .setButtonText('Create preset (auto)')
+          .setDisabled(!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret))
+          .onClick(async () => {
+            try {
+              const uploader = new CloudinaryUploader({
+                cloud_name: this.plugin.settings.cloudName,
+                api_key: this.plugin.settings.apiKey,
+                api_secret: this.plugin.settings.apiSecret,
+              });
+              const name = 'obsidian_auto_unsigned';
+              const res = await uploader.createUploadPreset(name);
+              this.plugin.settings.uploadPreset = (res && res.name) || name;
+              await this.plugin.saveSettings();
+              new Notice(`✅ Created upload preset '${this.plugin.settings.uploadPreset}'`);
+            } catch (e: any) {
+              const msg = e instanceof Error ? e.message : String(e);
+              if (/already exists|already/i.test(String(msg))) {
+                this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
+                await this.plugin.saveSettings();
+                new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
+              } else {
+                new Notice(`❌ Could not create preset: ${msg}`);
+                if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
+              }
+            }
+          })
       );
 
     // Max auto-upload size
