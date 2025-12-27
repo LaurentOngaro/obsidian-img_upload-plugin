@@ -62,7 +62,13 @@ Notes:
 >
 > - Create the unsigned upload preset manually in the Cloudinary Console (Settings → Upload presets) and paste the name into the plugin settings (recommended).
 > - Or run a small server-side script (example included at `src/server/create-preset-example.js`) and call that server from your local environment; server-side requests are not subject to browser CORS and can create the preset on your behalf.
-> 
+>
+> Example: create preset and print pretty JSON (requires `jq`):
+>
+> ```bash
+> curl -s -X POST http://localhost:3000/create-preset -d '{"name":"obsidian_auto_unsigned"}' -H "Content-Type: application/json" | jq .
+> ```
+>
 > See the Troubleshooting & Limitations section below for an example and a short guide.
 
 Configure the following values in plugin settings:

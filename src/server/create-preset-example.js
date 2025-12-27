@@ -47,7 +47,14 @@ app.post('/create-preset', async (req, res) => {
     const text = await r.text();
     if (!r.ok) return res.status(r.status).send(text);
 
-    return res.status(200).send(text);
+    // Try to parse JSON and return it. Cloudinary responds with JSON describing the preset.
+    try {
+      const json = JSON.parse(text);
+      return res.status(200).json(json);
+    } catch (parseErr) {
+      // If response isn't valid JSON, return it as text with a message
+      return res.status(200).json({ result: text });
+    }
   } catch (e) {
     console.error('Failed to create preset', e);
     return res.status(500).json({ error: 'Failed to create preset', message: String(e) });
