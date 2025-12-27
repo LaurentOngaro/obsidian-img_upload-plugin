@@ -9,8 +9,7 @@ export class CloudinaryHelpModal extends Modal {
     const { contentEl } = this;
     contentEl.createEl('h3', { text: 'Create an unsigned upload preset' });
     contentEl.createEl('p', {
-      text:
-        'To enable Auto Upload without exposing your API secret, create an unsigned upload preset in the Cloudinary Console. Follow these steps:'
+      text: 'To enable Auto Upload without exposing your API secret, create an unsigned upload preset in the Cloudinary Console. Follow these steps:',
     });
 
     const ul = contentEl.createEl('ol');
@@ -20,6 +19,9 @@ export class CloudinaryHelpModal extends Modal {
     ul.createEl('li', { text: 'Save and paste the preset name into the plugin settings' });
 
     contentEl.createEl('p', { text: 'You can also use the "Create preset (auto)" button in the plugin settings if you enabled storing API Secret.' });
+    contentEl.createEl('p', {
+      text: 'Note: Cloudinary management endpoints are not always callable from a browser due to CORS restrictions. If you see CORS errors, create the preset in the Cloudinary Console (recommended) or use a short server-side script to create the preset.',
+    });
     contentEl.createEl('p', { text: 'See Cloudinary docs for screenshots and more details.' });
 
     const link = contentEl.createEl('a', { text: 'Open Cloudinary docs', href: 'https://cloudinary.com/documentation/upload_presets' });

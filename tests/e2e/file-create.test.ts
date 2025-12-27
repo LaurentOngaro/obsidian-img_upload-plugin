@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { processFileCreate } from '../../src/file-handler';
+import { processFileCreate, resetAutoUploadWarnings } from '../../src/file-handler';
 
 describe('processFileCreate', () => {
   it('copies file locally when enabled and folder valid', async () => {
@@ -96,7 +96,14 @@ describe('processFileCreate', () => {
       upload = vi.fn().mockResolvedValue(url);
     }
 
-    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', maxAutoUploadSizeMB: 2, debugLogs: true };
+    const settings: any = {
+      autoUploadOnFileAdd: true,
+      cloudName: 'demo',
+      apiKey: 'key',
+      uploadPreset: 'preset',
+      maxAutoUploadSizeMB: 2,
+      debugLogs: true,
+    };
 
     const spy = vi.spyOn(console, 'log');
 
@@ -107,5 +114,36 @@ describe('processFileCreate', () => {
     expect(spy).toHaveBeenCalled();
 
     spy.mockRestore();
+  });
+
+  it('shows missing preset notice only once per session', async () => {
+    const file = { extension: 'png', name: 'image.png', path: 'notes/image.png' } as any;
+
+    const app: any = {
+      vault: {
+        readBinary: vi.fn().mockResolvedValue(new Uint8Array(100)),
+        createBinary: vi.fn(),
+        adapter: { exists: vi.fn().mockResolvedValue(false) },
+      },
+      workspace: { getActiveViewOfType: vi.fn().mockReturnValue(undefined) },
+    };
+
+    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', maxAutoUploadSizeMB: 2 };
+
+    // Ensure clean session state
+    resetAutoUploadWarnings();
+
+    const notify = vi.fn();
+
+    await processFileCreate(app, settings, file as any, undefined, { notify });
+    await processFileCreate(app, settings, file as any, undefined, { notify });
+
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining('Auto-upload skipped'));
+
+    // Reset and ensure it shows again
+    resetAutoUploadWarnings();
+    await processFileCreate(app, settings, file as any, undefined, { notify });
+    expect(notify).toHaveBeenCalledTimes(2);
   });
 });

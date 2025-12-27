@@ -44,4 +44,62 @@ describe('createUploadPreset flow', () => {
     presetSpy.mockRestore();
     processSpy.mockRestore();
   });
+
+  it('only attempts auto-create once per session when using plugin handleFileCreate', async () => {
+    // Reset auto-create state
+    const { resetAutoCreatePresetState } = await import('../../src/auto-create');
+    resetAutoCreatePresetState();
+
+    const settings: any = {
+      autoUploadOnFileAdd: true,
+      cloudName: 'demo',
+      apiKey: 'key',
+      apiSecret: 'secret',
+      allowStoreApiSecret: true,
+      uploadPreset: '',
+      debugLogs: false,
+    };
+
+    // Make createUploadPreset throw (e.g., CORS or network error)
+    const spy = vi.spyOn(CloudinaryUploader.prototype as any, 'createUploadPreset').mockRejectedValue(new Error('Failed to fetch'));
+
+    const pluginLike: any = {
+      settings,
+      saveSettings: vi.fn().mockResolvedValue(undefined),
+      app: {
+        vault: {
+          readBinary: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
+          createBinary: vi.fn(),
+          adapter: { exists: vi.fn().mockResolvedValue(false) },
+        },
+        workspace: { getActiveViewOfType: vi.fn().mockReturnValue(undefined) },
+      },
+    };
+
+    // Call the helper directly to simulate plugin behaviour (it uses a per-session guard)
+    const { tryAutoCreatePresetOnce } = await import('../../src/auto-create');
+    const notify = vi.fn();
+
+    await tryAutoCreatePresetOnce(settings, CloudinaryUploader as any, async () => {}, notify, false);
+    await tryAutoCreatePresetOnce(settings, CloudinaryUploader as any, async () => {}, notify, false);
+
+    // createUploadPreset should only have been attempted once (guarded inside the helper)
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // Reset session state and ensure another attempt will call again
+    resetAutoCreatePresetState();
+    spy.mockClear();
+
+    await tryAutoCreatePresetOnce(
+      settings,
+      CloudinaryUploader as any,
+      async () => {},
+      (m: string) => notify(m),
+      false
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // Cleanup
+    spy.mockRestore();
+  });
 });

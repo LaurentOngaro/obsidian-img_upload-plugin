@@ -1,5 +1,15 @@
 import { CloudinaryUploader } from './cloudinary';
 
+// Track warnings shown per runtime session to avoid spamming the user on startup
+let shownMissingAutoUploadWarning = false;
+
+/**
+ * Reset warning flags (useful for tests)
+ */
+export function resetAutoUploadWarnings() {
+  shownMissingAutoUploadWarning = false;
+}
+
 export async function processFileCreate(
   app: any,
   settings: any,
@@ -29,12 +39,19 @@ export async function processFileCreate(
   // Local copy will be performed after a successful upload. If auto-upload is disabled we'll perform the copy later in the function.
 
   // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
+  // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
   if (settings.autoUploadOnFileAdd && settings.cloudName) {
     const canUnsigned = !!settings.uploadPreset;
     const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
     if (!canUnsigned && !canSigned) {
       if (settings?.debugLogs) console.error('[img_upload] auto-upload skipped: missing upload_preset and API secret for signed uploads');
-      notify('⚠️ Auto-upload skipped: configure an Upload preset (for unsigned uploads) or enable & set API Secret (for signed uploads) in plugin settings.');
+      // Notify only once per session to avoid repeated notices on startup
+      if (!shownMissingAutoUploadWarning) {
+        notify(
+          '⚠️ Auto-upload skipped: configure an Upload preset (for unsigned uploads) or enable & set API Secret (for signed uploads) in plugin settings.'
+        );
+        shownMissingAutoUploadWarning = true;
+      }
       return;
     }
     const maxMB = settings.maxAutoUploadSizeMB ?? 0;
@@ -124,7 +141,9 @@ export async function processFileCreate(
 
       // Common Cloudinary guidance
       if (typeof message === 'string' && /upload preset|unsigned/i.test(message)) {
-        notify('❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).');
+        notify(
+          '❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).'
+        );
       } else if (typeof message === 'string' && /signature|api_secret/i.test(message)) {
         notify('❌ Upload failed: signature error. Verify API Key/API Secret and signing configuration.');
       } else {
