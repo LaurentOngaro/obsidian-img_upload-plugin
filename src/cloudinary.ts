@@ -76,6 +76,60 @@ export class CloudinaryUploader {
     const data: CloudinaryResponse = await response.json();
     return data.secure_url;
   }
+
+  /**
+   * Create an unsigned upload preset for the current Cloudinary account.
+   * Requires api_key and api_secret (and allow storing the secret enabled by the user).
+   */
+  async createUploadPreset(presetName: string): Promise<any> {
+    if (!this.settings.api_key || !this.settings.api_secret) {
+      throw new Error('API key and secret required to create upload preset');
+    }
+
+    const url = `https://api.cloudinary.com/v1_1/${this.settings.cloud_name}/upload_presets`;
+    const body = {
+      name: presetName,
+      unsigned: true,
+    } as any;
+
+    // Basic auth header
+    let authHeader: string;
+    if (typeof btoa !== 'undefined') {
+      authHeader = 'Basic ' + btoa(`${this.settings.api_key}:${this.settings.api_secret}`);
+    } else {
+      // Node/electron fallback
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const b = Buffer.from(`${this.settings.api_key}:${this.settings.api_secret}`);
+      authHeader = 'Basic ' + b.toString('base64');
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      // Try parse error
+      try {
+        const json = JSON.parse(text);
+        throw new Error(json.error?.message || text);
+      } catch (e) {
+        throw new Error(`Create preset failed: ${response.status} ${text}`);
+      }
+    }
+
+    try {
+      const json = JSON.parse(text);
+      return json;
+    } catch (e) {
+      throw new Error('Invalid response from create upload preset');
+    }
+  }
 }
 
 async function sha1Hex(input: string): Promise<string> {

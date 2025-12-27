@@ -26,25 +26,7 @@ export async function processFileCreate(
   const sizeBytes = (data as any)?.byteLength ?? (data as any)?.length ?? 0;
   if (settings?.debugLogs) console.log('[img_upload] file size bytes:', sizeBytes, 'maxMB:', settings.maxAutoUploadSizeMB);
 
-  if (settings.localCopyEnabled && settings.localCopyFolder) {
-    try {
-      const folder = sanitizeFolderPath(settings.localCopyFolder);
-      const destPath = folder ? `${folder}/${file.name}` : file.name;
-
-      const exists = await app.vault.adapter.exists(destPath);
-      let finalPath = destPath;
-      if (exists) {
-        const timestamp = Date.now();
-        finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
-      }
-
-      await app.vault.createBinary(finalPath, data as any);
-      notify(`✅ Copied image to ${finalPath}`);
-    } catch (e) {
-      if (settings?.debugLogs) console.error('[img_upload] copy local error', e);
-      notify('❌ Could not copy image locally: invalid folder path or permission error.');
-    }
-  }
+  // Local copy will be performed after a successful upload. If auto-upload is disabled we'll perform the copy later in the function.
 
   // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
   if (settings.autoUploadOnFileAdd && settings.cloudName) {
@@ -102,7 +84,27 @@ export async function processFileCreate(
       const url = await uploader.upload(blob, file.name);
       if (settings?.debugLogs) console.log('[img_upload] upload success', url);
       notify(`✅ Image uploaded: ${url}`);
+      // After successful upload, perform local copy if enabled
+      if (settings.localCopyEnabled && settings.localCopyFolder) {
+        try {
+          const folder = sanitizeFolderPath(settings.localCopyFolder);
+          const destPath = folder ? `${folder}/${file.name}` : file.name;
 
+          const exists = await app.vault.adapter.exists(destPath);
+          let finalPath = destPath;
+          if (exists) {
+            const timestamp = Date.now();
+            finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
+          }
+
+          await app.vault.createBinary(finalPath, data as any);
+          if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
+          notify(`✅ Copied image to ${finalPath}`);
+        } catch (e) {
+          if (settings?.debugLogs) console.error('[img_upload] copy local error after upload', e);
+          notify('❌ Could not copy image locally after upload: invalid folder path or permission error.');
+        }
+      }
       const view = app.workspace.getActiveViewOfType?.(null);
       if (view && view.editor) {
         const content = view.editor.getValue();
@@ -118,6 +120,28 @@ export async function processFileCreate(
       return { uploadedUrl: url };
     } finally {
       concurrentUploads--;
+    }
+  }
+
+  // If auto-upload is disabled but localCopy is enabled, perform local copy
+  if (!settings.autoUploadOnFileAdd && settings.localCopyEnabled && settings.localCopyFolder) {
+    try {
+      const folder = sanitizeFolderPath(settings.localCopyFolder);
+      const destPath = folder ? `${folder}/${file.name}` : file.name;
+
+      const exists = await app.vault.adapter.exists(destPath);
+      let finalPath = destPath;
+      if (exists) {
+        const timestamp = Date.now();
+        finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
+      }
+
+      await app.vault.createBinary(finalPath, data as any);
+      if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
+      notify(`✅ Copied image to ${finalPath}`);
+    } catch (e) {
+      if (settings?.debugLogs) console.error('[img_upload] copy local error', e);
+      notify('❌ Could not copy image locally: invalid folder path or permission error.');
     }
   }
 }
