@@ -18,6 +18,8 @@ export async function pasteClipboardImage(
   const clipboardAPI = clipboard ?? (typeof navigator !== 'undefined' ? (navigator as any).clipboard : undefined);
   if (!clipboardAPI || !clipboardAPI.read) throw new Error('Clipboard read not supported');
 
+  if (settings?.debugLogs) console.log('[img_upload] pasteClipboardImage: attempting to read clipboard');
+
   const items: any[] = await clipboardAPI.read();
   const clipboardItem = items.find((item) => item.types && item.types.some((t: string) => t.startsWith('image/')));
   if (!clipboardItem) throw new Error('No image in clipboard');

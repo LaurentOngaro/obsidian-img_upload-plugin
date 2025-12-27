@@ -76,4 +76,36 @@ describe('processFileCreate', () => {
 
     expect(result).toBeUndefined();
   });
+
+  it('works with debugLogs enabled and still uploads', async () => {
+    const file = { extension: 'png', name: 'image.png', path: 'notes/image.png' } as any;
+
+    const app: any = {
+      vault: {
+        readBinary: vi.fn().mockResolvedValue(new Uint8Array(1000)),
+        createBinary: vi.fn(),
+        adapter: { exists: vi.fn().mockResolvedValue(false) },
+      },
+      workspace: { getActiveViewOfType: vi.fn().mockReturnValue(undefined) },
+    };
+
+    const url = 'https://res.cloudinary.com/demo/image/upload/v12345/image.png';
+
+    class MockUploader {
+      constructor() {}
+      upload = vi.fn().mockResolvedValue(url);
+    }
+
+    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', maxAutoUploadSizeMB: 2, debugLogs: true };
+
+    const spy = vi.spyOn(console, 'log');
+
+    const result: any = await processFileCreate(app, settings, file as any, MockUploader as any);
+
+    expect(result).toBeTruthy();
+    expect(result.uploadedUrl).toBe(url);
+    expect(spy).toHaveBeenCalled();
+
+    spy.mockRestore();
+  });
 });

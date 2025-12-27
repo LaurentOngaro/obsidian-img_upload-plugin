@@ -9,13 +9,22 @@ export async function processFileCreate(
 ) {
   const notify = options.notify ?? (() => {});
 
-  if (!file || !file.extension) return;
+  if (settings?.debugLogs) console.log('[img_upload] processFileCreate called', { file, settings });
+
+  if (!file || !file.extension) {
+    if (settings?.debugLogs) console.log('[img_upload] skipping: missing extension or file', file);
+    return;
+  }
   const ext = (file.extension || '').toLowerCase();
   const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
-  if (!imageExts.includes(ext)) return;
+  if (!imageExts.includes(ext)) {
+    if (settings?.debugLogs) console.log('[img_upload] skipping: unsupported extension', ext);
+    return;
+  }
 
   const data = await app.vault.readBinary(file);
   const sizeBytes = (data as any)?.byteLength ?? (data as any)?.length ?? 0;
+  if (settings?.debugLogs) console.log('[img_upload] file size bytes:', sizeBytes, 'maxMB:', settings.maxAutoUploadSizeMB);
 
   if (settings.localCopyEnabled && settings.localCopyFolder) {
     try {
@@ -32,6 +41,7 @@ export async function processFileCreate(
       await app.vault.createBinary(finalPath, data as any);
       notify(`✅ Copied image to ${finalPath}`);
     } catch (e) {
+      if (settings?.debugLogs) console.error('[img_upload] copy local error', e);
       notify('❌ Could not copy image locally: invalid folder path or permission error.');
     }
   }
@@ -39,6 +49,7 @@ export async function processFileCreate(
   if (settings.autoUploadOnFileAdd && settings.cloudName && (settings.apiKey || settings.uploadPreset)) {
     const maxMB = settings.maxAutoUploadSizeMB ?? 0;
     if (maxMB > 0 && sizeBytes > maxMB * 1024 * 1024) {
+      if (settings?.debugLogs) console.log('[img_upload] skipping upload: exceeds size limit', { sizeBytes, maxMB });
       notify(`⚠️ Skipping auto-upload: file exceeds max size (${maxMB} MB)`);
       return;
     }
@@ -78,8 +89,10 @@ export async function processFileCreate(
         upload_preset: settings.uploadPreset,
       });
 
+      if (settings?.debugLogs) console.log('[img_upload] starting upload for', file.name);
       notify('⏳ Auto uploading image...');
       const url = await uploader.upload(blob, file.name);
+      if (settings?.debugLogs) console.log('[img_upload] upload success', url);
       notify(`✅ Image uploaded: ${url}`);
 
       const view = app.workspace.getActiveViewOfType?.(null);

@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS: CloudinaryPluginSettings = {
   localCopyEnabled: false,
   localCopyFolder: '',
   maxAutoUploadSizeMB: 10, // default 10 MB
+  debugLogs: false,
 };
 
 export default class CloudinaryPlugin extends Plugin {
@@ -73,9 +74,16 @@ export default class CloudinaryPlugin extends Plugin {
     }
 
     try {
+      if (this.settings.debugLogs) {
+        console.log('[img_upload] pasteImage: starting paste upload', { settings: this.settings });
+      }
       new Notice('⏳ Uploading...');
 
       const { url } = await pasteClipboardImage(this.settings, undefined, (navigator as any).clipboard);
+
+      if (this.settings.debugLogs) {
+        console.log('[img_upload] pasteImage: upload result', url);
+      }
 
       const view = this.app.workspace.getActiveViewOfType(MarkdownView);
       if (view && (view as any).editor) {
@@ -95,10 +103,16 @@ export default class CloudinaryPlugin extends Plugin {
   // Handle new files created in the vault: delegate to exported helper
   async handleFileCreate(file: TFile) {
     try {
-      await processFileCreate(this.app, this.settings, file, CloudinaryUploader);
+      if (this.settings.debugLogs) console.log('[img_upload] handleFileCreate called', file);
+      const notifyFn = (m: string) => {
+        if (this.settings.debugLogs) console.log('[img_upload] notice:', m);
+        new Notice(m);
+      };
+      await processFileCreate(this.app, this.settings, file, CloudinaryUploader, { notify: notifyFn });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       new Notice(`❌ Auto-upload error: ${msg}`);
+      if (this.settings.debugLogs) console.error('[img_upload] handleFileCreate error', err);
     }
   }
 
@@ -244,6 +258,18 @@ class CloudinarySettingTab extends PluginSettingTab {
           this.plugin.settings.localCopyEnabled = value;
           await this.plugin.saveSettings();
           if (folderText) folderText.setDisabled(!value);
+        })
+      );
+
+    // Debug logging toggle
+    new Setting(containerEl)
+      .setName('Debug logs')
+      .setDesc('When enabled, verbose logs will be written to the console and additional Notices will be shown to help debugging.')
+      .addToggle((toggle: any) =>
+        toggle.setValue(!!this.plugin.settings.debugLogs).onChange(async (value: boolean) => {
+          this.plugin.settings.debugLogs = value;
+          await this.plugin.saveSettings();
+          new Notice(`Debug logs ${value ? 'enabled' : 'disabled'}`);
         })
       );
 
