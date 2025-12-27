@@ -53,12 +53,19 @@ jobs:
             // Write upload_url to GITHUB_OUTPUT to expose as step output without using deprecated set-output
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `upload_url=${res.data.upload_url}\n`);
 
-      - name: Upload draft release asset
-        uses: actions/upload-release-asset@v1
+      - name: Upload draft release asset (via REST)
+        uses: actions/github-script@v6
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: release/obsidian-img_upload-plugin-draft-${{ github.run_number }}-${{ github.sha }}.zip
-          asset_name: obsidian-img_upload-plugin-draft-${{ github.run_number }}-${{ github.sha }}.zip
-          asset_content_type: application/zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const filePath = `release/obsidian-img_upload-plugin-draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}.zip`;
+            const content = fs.readFileSync(filePath);
+            const uploadUrl = `${process.env.UPLOAD_URL || '${{ steps.create_release.outputs.upload_url }}'}`;
+            const parsed = uploadUrl.replace('{?name,label}','');
+            await github.rest.repos.uploadReleaseAsset({
+              url: parsed,
+              headers: { 'content-type': 'application/zip' },
+              name: `obsidian-img_upload-plugin-draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}.zip`,
+              data: content
+            });
