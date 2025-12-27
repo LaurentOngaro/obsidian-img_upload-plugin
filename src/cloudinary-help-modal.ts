@@ -26,6 +26,17 @@ export class CloudinaryHelpModal extends Modal {
 
     const link = contentEl.createEl('a', { text: 'Open Cloudinary docs', href: 'https://cloudinary.com/documentation/upload_presets' });
     link.setAttr('target', '_blank');
+
+    // Link to the repository README section with example server instructions
+    contentEl.createEl('p', {
+      text: 'If creating a preset from the plugin fails due to CORS, you can run the included example server locally to create the preset from a trusted environment.',
+    });
+    contentEl.createEl('p', { text: 'The example server script is located at `src/server/create-preset-example.js` in this repository.' });
+    const serverLink = contentEl.createEl('a', {
+      text: 'Open example server instructions',
+      href: 'https://github.com/LaurentOngaro/obsidian-img_upload-plugin#dealing-with-cors-when-creating-upload-presets',
+    });
+    serverLink.setAttr('target', '_blank');
   }
 
   onClose() {
