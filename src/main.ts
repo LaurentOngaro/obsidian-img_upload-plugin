@@ -321,6 +321,39 @@ class CloudinarySettingTab extends PluginSettingTab {
         })
       );
 
+    // Inline help for Auto-upload (link + create preset button)
+    const autoHelp = containerEl.createDiv({ cls: 'setting-item' });
+    autoHelp.createEl('div', { text: 'Tip: You need an unsigned Upload preset (or signed uploads) for auto-upload to work.' });
+    const helpRow = autoHelp.createDiv({ cls: 'setting-item-control' });
+    const link = helpRow.createEl('a', { text: 'How to create an unsigned preset', href: 'https://cloudinary.com/documentation/upload_presets', attr: { target: '_blank' } });
+    helpRow.createEl('span', { text: ' ' });
+    const presetBtn = helpRow.createEl('button', { text: 'Create preset (auto)' });
+    presetBtn.addEventListener('click', async () => {
+      if (!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret)) {
+        new Notice('Enable and provide API Key & API Secret to auto-create a preset.');
+        return;
+      }
+      try {
+        const uploader = new CloudinaryUploader({ cloud_name: this.plugin.settings.cloudName, api_key: this.plugin.settings.apiKey, api_secret: this.plugin.settings.apiSecret });
+        const res = await uploader.createUploadPreset('obsidian_auto_unsigned');
+        this.plugin.settings.uploadPreset = (res && res.name) || 'obsidian_auto_unsigned';
+        await this.plugin.saveSettings();
+        new Notice(`✅ Created upload preset '${this.plugin.settings.uploadPreset}'`);
+      } catch (e: any) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/already exists|already/i.test(String(msg))) {
+          this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
+          await this.plugin.saveSettings();
+          new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
+        } else {
+          new Notice(`❌ Could not create preset: ${msg}`);
+          if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
+        }
+      }
+    });
+    // disable unless creds are available
+    if (!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret)) presetBtn.setAttribute('disabled', '');
+
     let folderText: any;
     new Setting(containerEl)
       .setName('Enable local copy')

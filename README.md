@@ -34,7 +34,7 @@ You can install this plugin directly from the GitHub repository:
 
 Notes:
 
-- You can also download a release ZIP (if available) instead of cloning. When we tag a release (v*.*.\*) this repo runs a build workflow that creates a ZIP release asset containing `main.js`, `manifest.json`, `README.md`, `LICENSE` and `package.json`.
+- You can also download a release ZIP (if available) instead of cloning. When we tag a release (`v*.*.*`) this repo runs a build workflow that creates a ZIP release asset containing `main.js`, `manifest.json`, `README.md`, `LICENSE` and `package.json`.
 - The `build.bat` script is a simple convenience for Windows that runs `npm install` and `npm run build` (you can also use `npm run build:win`).
 - For signed uploads prefer a server-side signing endpoint; see the `examples/signing-server` snippet in this repo.
   CI / releases
@@ -46,7 +46,16 @@ Notes:
 
 1. Create a Cloudinary account at https://cloudinary.com/
 2. Go to _Console → Dashboard_ to obtain your **Cloud name** and **API key** (and API secret if you plan to sign uploads server-side).
-3. Recommended (no secret exposure): create an **unsigned upload preset** in Cloudinary (under _Settings → Upload_ → _Upload presets_). Use that preset name in the plugin settings.
+
+3. Recommended (no secret exposure): create an **unsigned upload preset** in Cloudinary (under _Settings → Upload_ → _Upload presets_) and use that preset name in the plugin settings.
+
+   To create an unsigned preset:
+   - Open Cloudinary Console → Settings → Upload presets.
+   - Click **Create preset**.
+   - Give the preset a name and **uncheck** the box for "Signed only" so it is unsigned.
+   - Use the preset name in the plugin's **Upload preset** setting.
+
+   Note: The plugin includes a **Create preset (auto)** button on the Upload preset setting which can attempt to create an unsigned preset named `obsidian_auto_unsigned` for you — this requires that you have enabled **Allow storing API Secret (dangerous)** and provided both **API Key** and **API Secret**.
 
 Configure the following values in plugin settings:
 
@@ -113,7 +122,10 @@ The plugin offers two choices for uploads to Cloudinary:
 
 1. **Unsigned uploads (recommended)** — do **not** store `api_secret` in the plugin; configure **Cloud Name** + **Upload preset** and uploads will be unsigned.
 
-2. **Signed uploads (dangerous)** — enable **Allow storing API Secret (dangerous)** in the plugin settings and enter your **API Secret**. The plugin will use the secret to compute request signatures locally and perform signed uploads. **Warning:** storing the secret in your local settings exposes it to anyone with access to your vault or machine. Use this only if you understand and accept the security implications.
+2. **Signed uploads (dangerous)** — enable **Allow storing API Secret (dangerous)** in the plugin settings and enter your **API Secret**.
+   - The plugin will use the secret to compute request signatures locally and perform signed uploads.
+   - **Warning:** storing the secret in your local settings exposes it to anyone with access to your vault or machine.
+   - Use this only if you understand and accept the security implications.
 
 Other validations and safety measures:
 

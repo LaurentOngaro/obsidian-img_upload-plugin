@@ -118,6 +118,19 @@ export async function processFileCreate(
       }
 
       return { uploadedUrl: url };
+    } catch (e: any) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (settings?.debugLogs) console.error('[img_upload] upload error', e);
+
+      // Common Cloudinary guidance
+      if (typeof message === 'string' && /upload preset|unsigned/i.test(message)) {
+        notify('❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).');
+      } else if (typeof message === 'string' && /signature|api_secret/i.test(message)) {
+        notify('❌ Upload failed: signature error. Verify API Key/API Secret and signing configuration.');
+      } else {
+        notify(`❌ Upload failed: ${message}`);
+      }
+      return;
     } finally {
       concurrentUploads--;
     }
