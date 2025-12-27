@@ -50,6 +50,7 @@ Notes:
 3. Recommended (no secret exposure): create an **unsigned upload preset** in Cloudinary (under _Settings → Upload_ → _Upload presets_) and use that preset name in the plugin settings.
 
    To create an unsigned preset:
+
    - Open Cloudinary Console → Settings → Upload presets.
    - Click **Create preset**.
    - Give the preset a name and **uncheck** the box for "Signed only" so it is unsigned.

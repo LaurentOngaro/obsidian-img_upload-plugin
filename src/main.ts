@@ -104,23 +104,33 @@ export default class CloudinaryPlugin extends Plugin {
   }
 
   // Handle new files created in the vault: delegate to exported helper
+  // Per-session state to avoid repeated auto-create attempts and noisy network errors
+  private static _triedAutoCreatePreset = false;
+  private static _shownAutoCreatePresetWarning = false;
+
+  /**
+   * Reset per-session auto-create state (useful for tests)
+   */
+  static resetAutoCreatePresetState() {
+    CloudinaryPlugin._triedAutoCreatePreset = false;
+    CloudinaryPlugin._shownAutoCreatePresetWarning = false;
+  }
+
   async handleFileCreate(file: TFile) {
     try {
       if (this.settings.debugLogs) console.log('[img_upload] handleFileCreate called', file);
 
-      // Auto-create upload preset if possible using the helper in cloudinary.ts
-      try {
-        const preset = await ensureUploadPreset(this.settings, CloudinaryUploader as any);
-        if (preset) {
-          this.settings.uploadPreset = preset;
-          await this.saveSettings();
-          new Notice(`✅ Created/Retrieved unsigned upload preset '${preset}' and saved to settings`);
-        }
-      } catch (e: any) {
-        const msg = e instanceof Error ? e.message : String(e);
-        new Notice(`⚠️ Could not auto-create upload preset: ${msg}`);
-        if (this.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
-      }
+      // Attempt to auto-create the unsigned preset at most once per plugin session.
+      // This prevents repeated network attempts (and CORS preflight failures) when the vault
+      // is loaded and many files trigger this handler.
+      const { tryAutoCreatePresetOnce } = await import('./auto-create');
+      await tryAutoCreatePresetOnce(
+        this.settings,
+        CloudinaryUploader as any,
+        this.saveSettings.bind(this),
+        (m: string) => new Notice(m),
+        this.settings.debugLogs
+      );
 
       const notifyFn = (m: string) => {
         if (this.settings.debugLogs) console.log('[img_upload] notice:', m);
@@ -299,7 +309,9 @@ class CloudinarySettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
           // Warn user when enabling Auto Upload but neither upload preset nor signed credentials are configured
           if (value && !this.plugin.settings.uploadPreset && !(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiSecret)) {
-            new Notice('⚠️ Auto upload enabled but no Upload preset or API Secret configured. Uploads will fail unless you add an upload preset or set an API Secret.');
+            new Notice(
+              '⚠️ Auto upload enabled but no Upload preset or API Secret configured. Uploads will fail unless you add an upload preset or set an API Secret.'
+            );
           }
         })
       );
@@ -323,7 +335,11 @@ class CloudinarySettingTab extends PluginSettingTab {
         return;
       }
       try {
-        const uploader = new CloudinaryUploader({ cloud_name: this.plugin.settings.cloudName, api_key: this.plugin.settings.apiKey, api_secret: this.plugin.settings.apiSecret });
+        const uploader = new CloudinaryUploader({
+          cloud_name: this.plugin.settings.cloudName,
+          api_key: this.plugin.settings.apiKey,
+          api_secret: this.plugin.settings.apiSecret,
+        });
         const res = await uploader.createUploadPreset('obsidian_auto_unsigned');
         this.plugin.settings.uploadPreset = (res && res.name) || 'obsidian_auto_unsigned';
         await this.plugin.saveSettings();
@@ -343,7 +359,8 @@ class CloudinarySettingTab extends PluginSettingTab {
       }
     });
     // disable unless creds are available
-    if (!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret)) presetBtn.setAttribute('disabled', '');
+    if (!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret))
+      presetBtn.setAttribute('disabled', '');
 
     // Status indicator element
     const statusRow = containerEl.createDiv({ cls: 'setting-item' });
@@ -351,11 +368,22 @@ class CloudinarySettingTab extends PluginSettingTab {
     const statusEl = statusRow.createDiv({ cls: 'setting-item-control' });
     const updateStatusIndicator = () => {
       const hasPreset = !!(this.plugin && this.plugin.settings && this.plugin.settings.uploadPreset);
-      const hasSigned = !!(this.plugin && this.plugin.settings && this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret);
+      const hasSigned = !!(
+        this.plugin &&
+        this.plugin.settings &&
+        this.plugin.settings.allowStoreApiSecret &&
+        this.plugin.settings.apiKey &&
+        this.plugin.settings.apiSecret
+      );
       if (hasPreset || hasSigned) {
         statusEl.innerText = ' Ready (green)';
         statusEl.style.color = '#0b8457';
-      } else if (this.plugin && this.plugin.settings && this.plugin.settings.allowStoreApiSecret && (this.plugin.settings.apiKey || this.plugin.settings.apiSecret)) {
+      } else if (
+        this.plugin &&
+        this.plugin.settings &&
+        this.plugin.settings.allowStoreApiSecret &&
+        (this.plugin.settings.apiKey || this.plugin.settings.apiSecret)
+      ) {
         statusEl.innerText = ' Partial (yellow) — provide API Key & Secret';
         statusEl.style.color = '#b8860b';
       } else {
