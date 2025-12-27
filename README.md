@@ -37,10 +37,6 @@ Notes:
 - You can also download a release ZIP (if available) instead of cloning. When we tag a release (`v*.*.*`) this repo runs a build workflow that creates a ZIP release asset containing `main.js`, `manifest.json`, `README.md`, `LICENSE` and `package.json`.
 - The `build.bat` script is a simple convenience for Windows that runs `npm install` and `npm run build` (you can also use `npm run build:win`).
 - For signed uploads prefer a server-side signing endpoint; see the `examples/signing-server` snippet in this repo.
-  CI / releases
-
-- A GitHub Action builds and publishes a ZIP release asset when you push a **tag** like `v1.2.3` (see `.github/workflows/release.yml`).
-- Additionally, a draft release is automatically created on every push to `main` (see `.github/workflows/draft-release.yml`) — this is a convenience so you can inspect artifacts and promote a draft to a normal release when ready.
 
 ## Getting started
 
@@ -75,10 +71,21 @@ Configure the following values in plugin settings:
 
 - **Cloud Name** — your Cloudinary cloud name
 - **API Key** — public API key (optional for unsigned uploads, but required for some setups)
-- **Upload preset** — recommended for unsigned uploads (safer than storing your API secret in the plugin)
-- **API Secret** — _Not recommended_ to store in the plugin. Signed uploads must be created by your backend and are not performed from the frontend plugin.
+- **Upload preset** — recommended for unsigned uploads (safer than storing your API secret in the plugin). The setting includes a **Create unsigned preset (auto)** button (requires API Key & API Secret) that attempts to create an unsigned preset for you.
+- **API Secret** — _Not recommended_ to store in the plugin. Signed uploads must be created by your backend and are not performed from the frontend plugin. If you enable **Allow storing API Secret (dangerous)** you can opt-in to signed uploads or allow the plugin to create an unsigned preset using your credentials.
 
 > ⚠️ For security: do NOT store `API Secret` in a local plugin for general use; prefer unsigned upload presets or a small signing endpoint.
+
+## Settings (quick reference)
+
+- **Auto upload on file add** (toggle) — when enabled, new **image** files that are referenced in an open note (or the active editor) will be automatically uploaded to Cloudinary and the reference in the note replaced with the uploaded URL; files added elsewhere in the vault are ignored. This keeps uploads scoped to files you're actively editing/adding to notes and avoids uploading unrelated files.
+- **Max auto-upload size (MB)** — upper size limit for automatic uploads (default: 10 MB); files larger than this are skipped.
+- **Enable local copy** + **Local copy folder** — when enabled, the plugin will create a local copy of the image _only after_ a successful upload (to avoid leaving local files when upload fails). The folder path is relative to the vault root and must not contain `..` or be absolute.
+- **Signed uploads (dangerous)** / **Allow storing API Secret (dangerous)** — enables signed uploads using a locally stored secret (dangerous). Prefer unsigned presets or a server-side signing endpoint.
+- **Upload preset** — use an unsigned preset name here. The UI also shows a status indicator (Ready / Partial / Not configured) to surface whether auto-upload can run without additional setup. Note: the plugin only attempts auto-upload for files that are referenced in open notes (the plugin checks open notes and the active editor for references to the added file).
+- **Debug logs** — when enabled, extra console logs and Notices are shown to help troubleshoot upload failures.
+
+> Tip: If preset creation from the plugin is blocked by CORS or network errors, create the preset in the Cloudinary Console or use the included example server (`src/server/create-preset-example.js`) to create the preset from a trusted environment.
 
 ## Usage
 
@@ -89,13 +96,17 @@ Configure the following values in plugin settings:
   - Toggle **Auto upload on file add** to upload new images automatically when they are added to the vault.
   - Toggle **Enable local copy** and set **Local copy folder** (path relative to vault root) to copy new images into a specified folder.
   - Both options are disabled by default for safety; enabling either will cause the plugin to act on newly created image files in the vault.
-- When auto-upload is enabled and an active note contains a reference to the local file path, the plugin will attempt to replace that local reference with the uploaded Cloudinary URL in the active editor.
+- When auto-upload is enabled and an active note contains a reference to the local file path, the plugin will attempt to upload the image first and, after successful upload, replace that local reference with the uploaded Cloudinary URL in the active editor. If the upload fails the local file will not be copied or replaced.
+
+- If auto-upload is enabled but neither an upload preset nor signed credentials are configured, the plugin will skip automatic uploads and show a single troubleshooting Notice per app session explaining how to configure an upload preset or enable signed uploads (the warning is shown only once to avoid startup noise).
 
 ## Troubleshooting & Limitations
 
 - If `navigator.clipboard.read()` is not available in your environment, clipboard paste might fail — Obsidian/Electron environments differ by version.
 - Animated GIFs from clipboard may be converted to static images by some OS clipboards. Use drag-and-drop if you need animated gif uploads.
 - If you need signed uploads, implement a small server endpoint that generates Cloudinary upload signatures (recommended). The plugin also supports a second option: you may choose to store your `API Secret` locally and use signed uploads directly from the plugin, but this is dangerous and **strongly discouraged** unless you fully accept the risk.
+
+- When automatic preset creation or auto-upload runs into a network/CORS error, the plugin will surface a clear Notice and open the help modal with guidance; if the auto-create step fails repeatedly at startup the plugin now attempts the creation at most once per session to avoid repeated CORS errors flooding the console.
 
 ### Example: minimal Express signing server
 
