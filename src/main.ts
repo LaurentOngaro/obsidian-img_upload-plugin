@@ -456,26 +456,22 @@ class CloudinarySettingTab extends PluginSettingTab {
       .setName('Maintenance')
       .setDesc('Tools to manage the upload cache (uploaded image URL + file hash)')
       .addButton((btn: any) =>
-        btn
-          .setButtonText('Clear upload cache')
-          .onClick(async () => {
-            this.plugin.settings.uploadedFiles = {};
-            await this.plugin.saveSettings();
-            new Notice('✅ Upload cache cleared');
-          })
+        btn.setButtonText('Clear upload cache').onClick(async () => {
+          this.plugin.settings.uploadedFiles = {};
+          await this.plugin.saveSettings();
+          new Notice('✅ Upload cache cleared');
+        })
       )
       .addButton((btn: any) =>
-        btn
-          .setButtonText('Export upload cache')
-          .onClick(async () => {
-            const json = JSON.stringify(this.plugin.settings.uploadedFiles || {}, null, 2);
-            try {
-              await (navigator as any).clipboard.writeText(json);
-              new Notice('✅ Upload cache copied to clipboard');
-            } catch (e) {
-              new ExportModal(this.app, json).open();
-            }
-          })
+        btn.setButtonText('Export upload cache').onClick(async () => {
+          const json = JSON.stringify(this.plugin.settings.uploadedFiles || {}, null, 2);
+          try {
+            await (navigator as any).clipboard.writeText(json);
+            new Notice('✅ Upload cache copied to clipboard');
+          } catch (e) {
+            new ExportModal(this.app, json).open();
+          }
+        })
       );
 
     containerEl.createEl('hr');

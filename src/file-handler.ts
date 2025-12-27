@@ -61,12 +61,17 @@ export async function processFileCreate(
   async function computeSha1(buf: Uint8Array): Promise<string> {
     if (typeof crypto !== 'undefined' && (crypto as any).subtle) {
       const hashed = await (crypto as any).subtle.digest('SHA-1', buf);
-      return Array.from(new Uint8Array(hashed)).map((b) => b.toString(16).padStart(2, '0')).join('');
+      return Array.from(new Uint8Array(hashed))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
     }
     try {
       const nodeCrypto = await import('crypto');
       // Type casting to any to satisfy TypeScript typing for Buffer
-      return (nodeCrypto as any).createHash('sha1').update(buf as any).digest('hex');
+      return (nodeCrypto as any)
+        .createHash('sha1')
+        .update(buf as any)
+        .digest('hex');
     } catch (e) {
       throw new Error('No SHA-1 implementation available');
     }

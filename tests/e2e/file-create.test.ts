@@ -177,7 +177,13 @@ describe('processFileCreate', () => {
     // SHA1 of empty buffer
     const emptySha1 = 'da39a3ee5e6b4b0d3255bfef95601890afd80709';
 
-    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', uploadedFiles: { [file.path]: { url: 'https://cached.example/image.png', hash: emptySha1, updatedAt: Date.now() } } };
+    const settings: any = {
+      autoUploadOnFileAdd: true,
+      cloudName: 'demo',
+      apiKey: 'key',
+      uploadPreset: 'preset',
+      uploadedFiles: { [file.path]: { url: 'https://cached.example/image.png', hash: emptySha1, updatedAt: Date.now() } },
+    };
 
     class MockUploader {
       constructor() {}
