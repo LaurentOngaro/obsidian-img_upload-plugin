@@ -1,20 +1,25 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-# Run project CI checks before allowing commit
-echo "Running pre-commit CI checks: tests + build"
-
-# Run tests (e2e) - fail commit if tests fail
-npm run test:e2e -- --run
-if [ $? -ne 0 ]; then
-  echo "Pre-commit: Tests failed — aborting commit."
-  exit 1
+# Prefer running pre-commit framework if installed so `pre-commit run --all-files` works
+if command -v pre-commit >/dev/null 2>&1; then
+  echo "Running pre-commit hooks via pre-commit (all-files)..."
+  pre-commit run --hook-stage commit --all-files
+  status=$?
+  if [ $status -ne 0 ]; then
+    echo "Pre-commit (pre-commit) failed — aborting commit."
+    exit $status
+  fi
+  echo "Pre-commit checks (pre-commit) passed."
+  exit 0
 fi
 
-# Run build - ensures the built artifact is consistent
-npm run build
+# Fallback: run CI checks directly
+echo "pre-commit not found — running local CI checks: tests + build"
+
+npm run ci:checks
 if [ $? -ne 0 ]; then
-  echo "Pre-commit: Build failed — aborting commit."
+  echo "Pre-commit: CI checks failed — aborting commit."
   exit 1
 fi
 

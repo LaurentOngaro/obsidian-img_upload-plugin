@@ -130,7 +130,6 @@ Pre-commit checks
 - This repository installs a Git pre-commit hook (via Husky) that runs the same CI checks as our GitHub Actions: it runs the e2e tests and builds the plugin. Commits will be blocked if tests or build fail.
 - To enable hooks locally, run `npm install` (this runs `husky install` via the `prepare` script). You can bypass pre-commit hooks with `git commit --no-verify` (not recommended).
 
-
 ---
 
 If you want, I can also add an example server snippet for signed uploads and automated tests for the clipboard handling.

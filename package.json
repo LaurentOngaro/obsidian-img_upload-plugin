@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "test:e2e": "vitest",
+    "ci:checks": "npm run test:e2e -- --run && npm run build",
     "build": "esbuild src/main.ts --bundle --outfile=main.js --platform=browser --format=cjs --external:obsidian",
     "build:win": "cmd /c build.bat",
     "prepare": "husky install"
