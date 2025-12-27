@@ -341,7 +341,7 @@ class CloudinarySettingTab extends PluginSettingTab {
     const autoHelp = containerEl.createDiv({ cls: 'setting-item' });
     autoHelp.createEl('div', { text: 'Tip: You need an unsigned Upload preset (or signed uploads) for auto-upload to work.' });
     const helpRow = autoHelp.createDiv({ cls: 'setting-item-control' });
-    const linkBtn = helpRow.createEl('button', { text: 'Help: create an unsigned preset' });
+    const linkBtn = helpRow.createEl('button', { text: 'Help' });
     linkBtn.addEventListener('click', () => {
       // Open the help modal
       // CloudinaryHelpModal is defined below
@@ -388,7 +388,17 @@ class CloudinarySettingTab extends PluginSettingTab {
     // run once to initialize
     updateStatusIndicator();
 
-    // Whenever a relevant setting changes below, call updateStatusIndicator() to refresh the indicator.
+    // Debug logging toggle
+    new Setting(containerEl)
+      .setName('Debug logs')
+      .setDesc('When enabled, verbose logs will be written to the console and additional Notices will be shown to help debugging.')
+      .addToggle((toggle: any) =>
+        toggle.setValue(!!this.plugin.settings.debugLogs).onChange(async (value: boolean) => {
+          this.plugin.settings.debugLogs = value;
+          await this.plugin.saveSettings();
+          new Notice(`Debug logs ${value ? 'enabled' : 'disabled'}`);
+        })
+      );
 
     let folderText: any;
     new Setting(containerEl)
@@ -399,18 +409,6 @@ class CloudinarySettingTab extends PluginSettingTab {
           this.plugin.settings.localCopyEnabled = value;
           await this.plugin.saveSettings();
           if (folderText) folderText.setDisabled(!value);
-        })
-      );
-
-    // Debug logging toggle
-    new Setting(containerEl)
-      .setName('Debug logs')
-      .setDesc('When enabled, verbose logs will be written to the console and additional Notices will be shown to help debugging.')
-      .addToggle((toggle: any) =>
-        toggle.setValue(!!this.plugin.settings.debugLogs).onChange(async (value: boolean) => {
-          this.plugin.settings.debugLogs = value;
-          await this.plugin.saveSettings();
-          new Notice(`Debug logs ${value ? 'enabled' : 'disabled'}`);
         })
       );
 
