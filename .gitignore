@@ -12,6 +12,8 @@ yarn.lock
 # build
 main.js
 *.js.map
+build-info.json
+VERSION
 
 # eslint
 .eslintcache

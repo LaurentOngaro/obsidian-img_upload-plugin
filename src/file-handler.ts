@@ -1,3 +1,4 @@
+import { MarkdownView } from 'obsidian';
 import { CloudinaryUploader } from './cloudinary';
 
 // Track warnings shown per runtime session to avoid spamming the user on startup
@@ -23,11 +24,13 @@ export function resetAutoUploadWarnings() {
 
 /**
  * Mark a path as created by the plugin for a short window so the create handler ignores it.
+ * Uses a longer timeout to ensure the create event is fully processed by Obsidian.
  */
 export function markPluginCreatedPath(path: string) {
   pluginCreatedFiles.add(path);
-  // Remove after 30s to avoid memory growth and to only ignore immediate re-creates
-  setTimeout(() => pluginCreatedFiles.delete(path), 30 * 1000);
+  // Remove after 2 seconds - gives time for the create event to be fully handled
+  // and prevents double-processing of generated files
+  setTimeout(() => pluginCreatedFiles.delete(path), 2 * 1000);
 }
 
 export async function processFileCreate(
@@ -84,263 +87,273 @@ export async function processFileCreate(
   }
 
   // In-flight guard to avoid concurrent uploads of the same path
-  if ((processFileCreate as any).uploadingPaths?.has(file.path)) {
+  // Initialize uploadingPaths if not exists
+  (processFileCreate as any).uploadingPaths = (processFileCreate as any).uploadingPaths || new Set<string>();
+
+  if ((processFileCreate as any).uploadingPaths.has(file.path)) {
     if (settings?.debugLogs) console.log('[img_upload] skipping: upload already in progress for', file.path);
     return;
   }
 
-  // If a local copy folder is configured, skip files created inside that folder (we don't want to act on our own copies)
-  if (settings.localCopyEnabled && settings.localCopyFolder) {
-    try {
-      const folder = sanitizeFolderPath(settings.localCopyFolder);
-      if (folder && file.path.startsWith(`${folder}/`)) {
-        if (settings?.debugLogs) console.log('[img_upload] skipping: file is inside localCopyFolder', file.path);
-        return;
-      }
-    } catch (e) {
-      // invalid folder path will be handled later when attempting to write, ignore here
-    }
-  }
+  // Mark this file as being processed to prevent duplicate processing
+  // Pre-mark before anything else to catch race conditions early
+  (processFileCreate as any).uploadingPaths.add(file.path);
 
-  // Local copy will be performed after a successful upload. If auto-upload is disabled we'll perform the copy later in the function.
+  // Also mark in pluginCreatedFiles immediately to ensure we don't reprocess if
+  // this event is triggered multiple times before we're done
+  markPluginCreatedPath(file.path);
 
-  // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
-  // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
-  if (settings.autoUploadOnFileAdd && settings.cloudName) {
-    // Only attempt auto-upload for files that are referenced in an open note or the active editor. This keeps uploads scoped to
-    // files you're actually editing or adding to notes (prevents mass uploads during vault indexing).
-    try {
-      const leaves = (app.workspace.getLeavesOfType && app.workspace.getLeavesOfType('markdown')) || [];
-      const activeView = app.workspace.getActiveViewOfType?.(null) as any;
-      const hasOpenNotes = leaves.length > 0 || (!!activeView && activeView.editor);
-
-      // Strict behavior: require the file to be referenced in an open note (or the active editor).
-      // If there are no open notes or the file is not referenced, do not attempt auto-upload.
-      if (!hasOpenNotes) {
-        if (settings?.debugLogs) console.log('[img_upload] skipping upload: no open notes present to reference file', file.path);
-        return;
-      }
-
-      let referenced = false;
-      for (const leaf of leaves) {
-        const view = leaf.view as any;
-        if (view && view.editor) {
-          const content = view.editor.getValue() || '';
-          if (content.includes(file.path) || content.includes(file.name)) {
-            referenced = true;
-            break;
-          }
-        }
-      }
-
-      // Also check the active view just in case
-      if (!referenced && activeView && activeView.editor) {
-        const content = activeView.editor.getValue() || '';
-        if (content.includes(file.path) || content.includes(file.name)) referenced = true;
-      }
-
-      if (!referenced) {
-        if (settings?.debugLogs) console.log('[img_upload] skipping upload: file not referenced in open notes or active editor', file.path);
-        return;
-      }
-
-      // Compute file hash and check persistent cache of uploaded files
-      const hash = await computeSha1(data as Uint8Array);
-      if (!settings.uploadedFiles) settings.uploadedFiles = {};
-      const cached = settings.uploadedFiles[file.path];
-      if (cached && cached.hash === hash && cached.url) {
-        if (settings?.debugLogs) console.log('[img_upload] using cached upload for', file.path, cached.url);
-        // Replace local reference in active editor if present
-        const view = app.workspace.getActiveViewOfType?.(null) as any;
-        if (view && view.editor) {
-          const content = view.editor.getValue();
-          const esc = escapeRegExp(file.path);
-          const imageRegex = new RegExp(`!\\[([^\\]]*)\\](${esc})`, 'g');
-          if (imageRegex.test(content)) {
-            const newContent = content.replace(imageRegex, `![$1](${cached.url})`);
-            view.editor.setValue(newContent);
-            notify('🔁 Replaced local image reference with cached Cloudinary URL in the current editor.');
-          }
-        }
-        return { cachedUrl: cached.url };
-      }
-    } catch (e) {
-      if (settings?.debugLogs) console.error('[img_upload] reference check error', e);
-      // If reference check fails for any reason, do not block auto-upload; fall through to existing checks
-    }
-    const canUnsigned = !!settings.uploadPreset;
-    const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
-    if (!canUnsigned && !canSigned) {
-      if (settings?.debugLogs) console.error('[img_upload] auto-upload skipped: missing upload_preset and API secret for signed uploads');
-      // Notify only once per session to avoid repeated notices on startup
-      if (!shownMissingAutoUploadWarning) {
-        notify(
-          '⚠️ Auto-upload skipped: configure an Upload preset (for unsigned uploads) or enable & set API Secret (for signed uploads) in plugin settings.'
-        );
-        shownMissingAutoUploadWarning = true;
-      }
-      return;
-    }
-    const maxMB = settings.maxAutoUploadSizeMB ?? 0;
-    if (maxMB > 0 && sizeBytes > maxMB * 1024 * 1024) {
-      if (settings?.debugLogs) console.log('[img_upload] skipping upload: exceeds size limit', { sizeBytes, maxMB });
-      notify(`⚠️ Skipping auto-upload: file exceeds max size (${maxMB} MB)`);
-      return;
-    }
-
-    const mime = getMimeFromExt(ext);
-    const blob = new Blob([data], { type: mime });
-
-    function getMimeFromExt(ext2: string): string {
-      switch ((ext2 || '').toLowerCase()) {
-        case 'jpg':
-        case 'jpeg':
-          return 'image/jpeg';
-        case 'png':
-          return 'image/png';
-        case 'gif':
-          return 'image/gif';
-        case 'webp':
-          return 'image/webp';
-        case 'svg':
-          return 'image/svg+xml';
-        default:
-          return 'application/octet-stream';
-      }
-    }
-
-    while (concurrentUploads >= MAX_CONCURRENT_UPLOADS) {
-      // simple backoff
-      // eslint-disable-next-line no-await-in-loop
-      await new Promise((r) => setTimeout(r, 200));
-    }
-
-    concurrentUploads++;
-    // mark in-flight
-    (processFileCreate as any).uploadingPaths = (processFileCreate as any).uploadingPaths || new Set<string>();
-    (processFileCreate as any).uploadingPaths.add(file.path);
-
-    try {
-      const uploader = new uploaderCtor({
-        cloud_name: settings.cloudName,
-        api_key: settings.apiKey,
-        upload_preset: settings.uploadPreset,
-      });
-
-      if (settings?.debugLogs) console.log('[img_upload] starting upload for', file.name);
-      notify('⏳ Auto uploading image...');
-      const url = await uploader.upload(blob, file.name);
-      if (settings?.debugLogs) console.log('[img_upload] upload success', url);
-      notify(`✅ Image uploaded: ${url}`);
-
-      // Persist cache: compute hash and store mapping (in-memory + persist if saveSettings provided)
+  // Wrap everything in try/finally to ensure uploadingPaths cleanup even on early returns
+  try {
+    // If a local copy folder is configured, skip files created inside that folder (we don't want to act on our own copies)
+    if (settings.localCopyEnabled && settings.localCopyFolder) {
       try {
-        const hashAfter = await computeSha1(data as Uint8Array);
-        settings.uploadedFiles = settings.uploadedFiles || {};
-        settings.uploadedFiles[file.path] = { url, hash: hashAfter, updatedAt: Date.now() } as any;
-        try {
-          await saveSettings(settings);
-        } catch (e) {
-          if (settings?.debugLogs) console.error('[img_upload] saveSettings failed', e);
+        const folder = sanitizeFolderPath(settings.localCopyFolder);
+        // Normalize path separators: convert backslashes to forward slashes for consistent comparison
+        const normalizedFilePath = file.path.replace(/\\/g, '/');
+        if (folder && normalizedFilePath.startsWith(`${folder}/`)) {
+          if (settings?.debugLogs) console.log('[img_upload] skipping: file is inside localCopyFolder', file.path);
+          return;
         }
       } catch (e) {
-        if (settings?.debugLogs) console.error('[img_upload] compute hash for cache failed', e);
+        // invalid folder path will be handled later when attempting to write, ignore here
+      }
+    }
+
+    // Local copy will be performed after a successful upload. If auto-upload is disabled we'll perform the copy later in the function.
+
+    // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
+    if (settings.autoUploadOnFileAdd && settings.cloudName) {
+      // Compute file hash once for cache checking and storage
+      let fileHash: string | undefined;
+
+      // Only attempt auto-upload for files that are referenced in an open note or the active editor. This keeps uploads scoped to
+      // files you're actually editing or adding to notes (prevents mass uploads during vault indexing).
+      try {
+        const leaves = (app.workspace.getLeavesOfType && app.workspace.getLeavesOfType('markdown')) || [];
+        const activeView = app.workspace.getActiveViewOfType?.(MarkdownView) as any;
+        const hasOpenNotes = leaves.length > 0 || (!!activeView && activeView.editor);
+
+        // Strict behavior: require the file to be referenced in an open note (or the active editor).
+        // If there are no open notes or the file is not referenced, do not attempt auto-upload.
+        if (!hasOpenNotes) {
+          if (settings?.debugLogs) console.log('[img_upload] skipping upload: no open notes present to reference file', file.path);
+          return;
+        }
+
+        let referenced = false;
+        for (const leaf of leaves) {
+          const view = leaf.view as any;
+          if (view && view.editor) {
+            const content = view.editor.getValue() || '';
+            if (content.includes(file.path) || content.includes(file.name)) {
+              referenced = true;
+              break;
+            }
+          }
+        }
+
+        // Also check the active view just in case
+        if (!referenced && activeView && activeView.editor) {
+          const content = activeView.editor.getValue() || '';
+          if (content.includes(file.path) || content.includes(file.name)) referenced = true;
+        }
+
+        if (!referenced) {
+          if (settings?.debugLogs) console.log('[img_upload] skipping upload: file not referenced in open notes or active editor', file.path);
+          return;
+        }
+
+        // Compute file hash once and check persistent cache of uploaded files
+        fileHash = await computeSha1(data as Uint8Array);
+        if (!settings.uploadedFiles) settings.uploadedFiles = {};
+        const cached = settings.uploadedFiles[file.path];
+        if (cached && cached.hash === fileHash && cached.url) {
+          if (settings?.debugLogs) console.log('[img_upload] using cached upload for', file.path, cached.url);
+          // Replace local reference in active editor if present
+          if (replaceImageReference(app, file, cached.url, settings, notify, 'replaced with cached url')) {
+            notify('🔁 Replaced local image reference with cached Cloudinary URL in the current editor.');
+          }
+          return { cachedUrl: cached.url };
+        }
+      } catch (e) {
+        if (settings?.debugLogs) console.error('[img_upload] reference check error', e);
+        // If reference check fails for any reason, do not block auto-upload; fall through to existing checks
+      }
+      const canUnsigned = !!settings.uploadPreset;
+      const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
+      if (!canUnsigned && !canSigned) {
+        if (settings?.debugLogs) console.error('[img_upload] auto-upload skipped: missing upload_preset and API secret for signed uploads');
+        // Notify only once per session to avoid repeated notices on startup
+        if (!shownMissingAutoUploadWarning) {
+          notify(
+            '⚠️ Auto-upload skipped: configure an Upload preset (for unsigned uploads) or enable & set API Secret (for signed uploads) in plugin settings.'
+          );
+          shownMissingAutoUploadWarning = true;
+        }
+        return;
+      }
+      const maxMB = settings.maxAutoUploadSizeMB ?? 0;
+      if (maxMB > 0 && sizeBytes > maxMB * 1024 * 1024) {
+        if (settings?.debugLogs) console.log('[img_upload] skipping upload: exceeds size limit', { sizeBytes, maxMB });
+        notify(`⚠️ Skipping auto-upload: file exceeds max size (${maxMB} MB)`);
+        return;
       }
 
-      // After successful upload, perform local copy if enabled
-      if (settings.localCopyEnabled && settings.localCopyFolder) {
-        try {
-          const folder = sanitizeFolderPath(settings.localCopyFolder);
-          const destPath = folder ? `${folder}/${file.name}` : file.name;
+      const mime = getMimeFromExt(ext);
+      const blob = new Blob([data], { type: mime });
 
-          const exists = await app.vault.adapter.exists(destPath);
-          let finalPath = destPath;
-          if (exists) {
-            const timestamp = Date.now();
-            finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
-          }
-
-          // Mark the path as created by the plugin before creating it to avoid our create handler re-processing this file
-          try {
-            markPluginCreatedPath(finalPath);
-          } catch (err) {
-            // best-effort; ignore errors in marking
-            if (settings?.debugLogs) console.error('[img_upload] markPluginCreatedPath error', err);
-          }
-
-          await app.vault.createBinary(finalPath, data as any);
-          if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
-          notify(`✅ Copied image to ${finalPath}`);
-        } catch (e) {
-          if (settings?.debugLogs) console.error('[img_upload] copy local error after upload', e);
-          notify('❌ Could not copy image locally after upload: invalid folder path or permission error.');
+      function getMimeFromExt(ext2: string): string {
+        switch ((ext2 || '').toLowerCase()) {
+          case 'jpg':
+          case 'jpeg':
+            return 'image/jpeg';
+          case 'png':
+            return 'image/png';
+          case 'gif':
+            return 'image/gif';
+          case 'webp':
+            return 'image/webp';
+          case 'svg':
+            return 'image/svg+xml';
+          default:
+            return 'application/octet-stream';
         }
       }
-      const view = app.workspace.getActiveViewOfType?.(null);
-      if (view && view.editor) {
-        const content = view.editor.getValue();
-        const esc = escapeRegExp(file.path);
-        const imageRegex = new RegExp(`!\\[([^\\]]*)\\]\\(${esc}\\)`, 'g');
-        if (imageRegex.test(content)) {
-          const newContent = content.replace(imageRegex, `![$1](${url})`);
-          view.editor.setValue(newContent);
+
+      while (concurrentUploads >= MAX_CONCURRENT_UPLOADS) {
+        // simple backoff
+        // eslint-disable-next-line no-await-in-loop
+        await new Promise((r) => setTimeout(r, 200));
+      }
+
+      concurrentUploads++;
+
+      try {
+        const uploader = new uploaderCtor({
+          cloud_name: settings.cloudName,
+          api_key: settings.apiKey,
+          upload_preset: settings.uploadPreset,
+        });
+
+        if (settings?.debugLogs) console.log('[img_upload] starting upload for', file.name);
+        notify('⏳ Auto uploading image...');
+        const url = await uploader.upload(blob, file.name);
+        if (settings?.debugLogs) console.log('[img_upload] upload success', url);
+        notify(`✅ Image uploaded: ${url}`);
+
+        // Persist cache: store mapping with the already computed hash (in-memory + persist if saveSettings provided)
+        try {
+          settings.uploadedFiles = settings.uploadedFiles || {};
+          settings.uploadedFiles[file.path] = { url, hash: fileHash!, updatedAt: Date.now() } as any;
+          try {
+            await saveSettings(settings);
+          } catch (e) {
+            if (settings?.debugLogs) console.error('[img_upload] saveSettings failed', e);
+          }
+        } catch (e) {
+          if (settings?.debugLogs) console.error('[img_upload] compute hash for cache failed', e);
+        }
+
+        // After successful upload, perform local copy if enabled AND file is not already in the target folder
+        if (settings.localCopyEnabled && settings.localCopyFolder) {
+          try {
+            const folder = sanitizeFolderPath(settings.localCopyFolder);
+
+            // Skip copy if file is already in the destination folder
+            // Normalize path: convert backslashes to forward slashes for consistent comparison
+            const normalizedFilePath = file.path.replace(/\\/g, '/');
+            if (folder && normalizedFilePath.startsWith(`${folder}/`)) {
+              if (settings?.debugLogs) console.log('[img_upload] skipping local copy: file already in target folder', file.path);
+            } else {
+              const destPath = folder ? `${folder}/${file.name}` : file.name;
+
+              const exists = await app.vault.adapter.exists(destPath);
+              let finalPath = destPath;
+              if (exists) {
+                const timestamp = Date.now();
+                finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
+              }
+
+              // Mark the path as created by the plugin before creating it to avoid our create handler re-processing this file
+              try {
+                markPluginCreatedPath(finalPath);
+              } catch (err) {
+                // best-effort; ignore errors in marking
+                if (settings?.debugLogs) console.error('[img_upload] markPluginCreatedPath error', err);
+              }
+
+              await app.vault.createBinary(finalPath, data as any);
+              if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
+              notify(`✅ Copied image to ${finalPath}`);
+            }
+          } catch (e) {
+            if (settings?.debugLogs) console.error('[img_upload] copy local error after upload', e);
+            notify('❌ Could not copy image locally after upload: invalid folder path or permission error.');
+          }
+        }
+
+        // Replace image reference with Cloudinary URL
+        if (replaceImageReference(app, file, url, settings, notify, 'replaced')) {
           notify('🔁 Replaced local image reference with Cloudinary URL in the current editor.');
         }
-      }
 
-      return { uploadedUrl: url };
-    } catch (e: any) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (settings?.debugLogs) console.error('[img_upload] upload error', e);
+        return { uploadedUrl: url };
+      } catch (e: any) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (settings?.debugLogs) console.error('[img_upload] upload error', e);
 
-      // Common Cloudinary guidance
-      if (typeof message === 'string' && /upload preset|unsigned/i.test(message)) {
-        // Show this guidance only once per session to avoid repeated notices when a preset exists but is not
-        // configured for unsigned uploads (Cloudinary returns 400 for each attempted file upload).
-        if (!shownInvalidUploadPresetWarning) {
-          shownInvalidUploadPresetWarning = true;
-          notify(
-            '❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).'
-          );
-        } else if (settings?.debugLogs) {
-          console.error('[img_upload] upload error (invalid preset) - repeated error suppressed', e);
+        // Common Cloudinary guidance
+        if (typeof message === 'string' && /upload preset|unsigned/i.test(message)) {
+          // Show this guidance only once per session to avoid repeated notices when a preset exists but is not
+          // configured for unsigned uploads (Cloudinary returns 400 for each attempted file upload).
+          if (!shownInvalidUploadPresetWarning) {
+            shownInvalidUploadPresetWarning = true;
+            notify(
+              '❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).'
+            );
+          } else if (settings?.debugLogs) {
+            console.error('[img_upload] upload error (invalid preset) - repeated error suppressed', e);
+          }
+        } else if (typeof message === 'string' && /signature|api_secret/i.test(message)) {
+          notify('❌ Upload failed: signature error. Verify API Key/API Secret and signing configuration.');
+        } else {
+          notify(`❌ Upload failed: ${message}`);
         }
-      } else if (typeof message === 'string' && /signature|api_secret/i.test(message)) {
-        notify('❌ Upload failed: signature error. Verify API Key/API Secret and signing configuration.');
-      } else {
-        notify(`❌ Upload failed: ${message}`);
+        return;
+      } finally {
+        concurrentUploads--;
       }
-      return;
-    } finally {
-      concurrentUploads--;
+    }
+
+    // If auto-upload is disabled but localCopy is enabled, perform local copy
+    if (!settings.autoUploadOnFileAdd && settings.localCopyEnabled && settings.localCopyFolder) {
       try {
-        (processFileCreate as any).uploadingPaths?.delete(file.path);
-      } catch (err) {
-        /* ignore */
+        const folder = sanitizeFolderPath(settings.localCopyFolder);
+        const destPath = folder ? `${folder}/${file.name}` : file.name;
+
+        const exists = await app.vault.adapter.exists(destPath);
+        let finalPath = destPath;
+        if (exists) {
+          const timestamp = Date.now();
+          finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
+        }
+
+        await app.vault.createBinary(finalPath, data as any);
+        if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
+        notify(`✅ Copied image to ${finalPath}`);
+      } catch (e) {
+        if (settings?.debugLogs) console.error('[img_upload] copy local error', e);
+        notify('❌ Could not copy image locally: invalid folder path or permission error.');
       }
     }
-  }
-
-  // If auto-upload is disabled but localCopy is enabled, perform local copy
-  if (!settings.autoUploadOnFileAdd && settings.localCopyEnabled && settings.localCopyFolder) {
-    try {
-      const folder = sanitizeFolderPath(settings.localCopyFolder);
-      const destPath = folder ? `${folder}/${file.name}` : file.name;
-
-      const exists = await app.vault.adapter.exists(destPath);
-      let finalPath = destPath;
-      if (exists) {
-        const timestamp = Date.now();
-        finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
-      }
-
-      await app.vault.createBinary(finalPath, data as any);
-      if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
-      notify(`✅ Copied image to ${finalPath}`);
-    } catch (e) {
-      if (settings?.debugLogs) console.error('[img_upload] copy local error', e);
-      notify('❌ Could not copy image locally: invalid folder path or permission error.');
-    }
+  } finally {
+    // Delay cleanup of uploadingPaths significantly to prevent re-entry from Obsidian's asynchronous create events
+    // The generated file's create event may arrive shortly after createBinary returns, and we need to ensure
+    // uploadingPaths is still present to gate duplicate processing
+    setTimeout(() => {
+      (processFileCreate as any).uploadingPaths?.delete(file.path);
+    }, 2000);
   }
 }
 
@@ -348,13 +361,61 @@ let concurrentUploads = 0;
 const MAX_CONCURRENT_UPLOADS = 3;
 
 function escapeRegExp(str: string) {
+  // Escape all special regex characters including backslashes
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Replace image references in the active editor with a Cloudinary URL
+ * @returns true if replacement was made, false otherwise
+ */
+function replaceImageReference(
+  app: any,
+  file: any,
+  replacementUrl: string,
+  settings: any,
+  notify: (msg: string) => void,
+  logPrefix: string
+): boolean {
+  const view = app.workspace.getActiveViewOfType?.(MarkdownView);
+  if (!view || !view.editor) return false;
+
+  const content = view.editor.getValue();
+  const esc = escapeRegExp(file.path);
+  const fileName = escapeRegExp(file.name);
+
+  let newContent = content;
+
+  // First try exact path match
+  const pathRegex = new RegExp(`!\\[([^\\]]*)\\]\\(${esc}\\)`, 'g');
+  if (content.match(pathRegex)) {
+    newContent = newContent.replace(pathRegex, `![$1](${replacementUrl})`);
+    if (settings?.debugLogs) console.log(`[img_upload] ${logPrefix} by path:`, file.path);
+  } else {
+    // Then try filename match (handles various path formats)
+    const nameRegex = new RegExp(`!\\[([^\\]]*)\\]\\([^)]*${fileName}[^)]*\\)`, 'g');
+    if (content.match(nameRegex)) {
+      newContent = newContent.replace(nameRegex, `![$1](${replacementUrl})`);
+      if (settings?.debugLogs) console.log(`[img_upload] ${logPrefix} by name:`, file.name);
+    }
+  }
+
+  if (newContent !== content) {
+    view.editor.setValue(newContent);
+    return true;
+  }
+
+  if (settings?.debugLogs) {
+    console.log('[img_upload] no reference found to replace for', file.path);
+  }
+  return false;
 }
 
 function sanitizeFolderPath(value: string): string {
   if (!value) return '';
-  if (/\.\.|^[A-Za-z]:\\\\|^\//.test(value)) {
-    throw new Error('Invalid folder path');
+  // Reject paths with: .. (parent dir), absolute paths (/path or C:\path), or backslashes
+  if (/\.\.|^[A-Za-z]:[/\\]|^[/\\]/.test(value)) {
+    throw new Error('Invalid folder path: use relative paths only (e.g., "assets/images")');
   }
-  return value.replace(/^\/+|\/+$/g, '');
+  return value.replace(/^[/\\]+|[/\\]+$/g, '');
 }

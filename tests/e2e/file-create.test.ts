@@ -1,7 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { processFileCreate, resetAutoUploadWarnings } from '../../src/file-handler';
 
 describe('processFileCreate', () => {
+  beforeEach(() => {
+    // Reset all session state before each test
+    resetAutoUploadWarnings();
+  });
+
   it('copies file locally when enabled and folder valid', async () => {
     const file = { extension: 'png', name: 'image.png', path: 'notes/image.png' } as any;
 

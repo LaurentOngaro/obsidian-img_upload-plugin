@@ -5,7 +5,7 @@
     "test:e2e": "vitest",
     "ci:checks": "npm run test:e2e -- --run && npm run build",
     "build": "esbuild src/main.ts --bundle --outfile=main.js --platform=browser --format=cjs --external:obsidian",
-    "build:win": "cmd /c build.bat",
+    "build:win": "powershell -ExecutionPolicy Bypass -File build.ps1",
     "prepare": "husky install"
   },
   "description": "Image upload plugin for Obsidian (via Cloudinary)",

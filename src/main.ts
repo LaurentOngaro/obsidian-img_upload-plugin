@@ -42,9 +42,11 @@ const DEFAULT_SETTINGS: CloudinaryPluginSettings = {
 export default class CloudinaryPlugin extends Plugin {
   settings: CloudinaryPluginSettings = DEFAULT_SETTINGS;
   private uploader?: CloudinaryUploader;
+  private buildInfo: { version: string; buildNumber: number; buildTime?: string } = { version: '1.0.0', buildNumber: 0 };
 
   async onload() {
     await this.loadSettings();
+    await this.loadBuildInfo();
 
     // Commande: Coller image depuis le presse-papiers
     this.addCommand({
@@ -180,6 +182,36 @@ export default class CloudinaryPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  async loadBuildInfo() {
+    // Try multiple possible paths for build-info.json
+    const paths = [
+      './build-info.json', // Relative to current directory
+      './plugins/obsidian-img_upload-plugin/build-info.json', // Plugins folder
+      'build-info.json', // Root
+    ];
+
+    for (const path of paths) {
+      try {
+        const response = await fetch(path);
+        if (response.ok) {
+          this.buildInfo = await response.json();
+          return;
+        }
+      } catch (e) {
+        // Try next path
+      }
+    }
+
+    // If all paths fail, use defaults
+    if (this.settings.debugLogs) {
+      console.log('[img_upload] build-info.json not found, using defaults');
+    }
+  }
+
+  getBuildString(): string {
+    return `build v${this.buildInfo.version} #${this.buildInfo.buildNumber}`;
   }
 }
 
@@ -477,6 +509,16 @@ class CloudinarySettingTab extends PluginSettingTab {
     containerEl.createEl('hr');
     containerEl.createEl('p', {
       text: '📝 Get credentials: https://cloudinary.com/console/settings/api-keys',
+    });
+
+    // Display build version at the bottom
+    const versionContainer = containerEl.createDiv({ cls: 'setting-item' });
+    versionContainer.style.marginTop = '2em';
+    versionContainer.style.textAlign = 'center';
+    versionContainer.style.fontSize = '0.85em';
+    versionContainer.style.color = 'var(--text-muted)';
+    versionContainer.createEl('p', {
+      text: this.plugin.getBuildString(),
     });
   }
 }
