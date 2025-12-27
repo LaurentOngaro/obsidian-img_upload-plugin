@@ -58,6 +58,19 @@ Notes:
 
    Note: The plugin includes a **Create preset (auto)** button on the Upload preset setting which can attempt to create an unsigned preset named `obsidian_auto_unsigned` for you — this requires that you have enabled **Allow storing API Secret (dangerous)** and provided both **API Key** and **API Secret**.
 
+> Note on CORS: creating upload presets from a renderer/Browser context may be blocked by CORS (you may see preflight failures in DevTools like "No 'Access-Control-Allow-Origin' header" or "Failed to fetch"). If this happens, the recommended approaches are:
+>
+> - Create the unsigned upload preset manually in the Cloudinary Console (Settings → Upload presets) and paste the name into the plugin settings (recommended).
+> - Or run a small server-side script (example included at `src/server/create-preset-example.js`) and call that server from your local environment; server-side requests are not subject to browser CORS and can create the preset on your behalf.
+>
+> Example: create preset and print pretty JSON (requires `jq`):
+>
+> ```bash
+> curl -s -X POST http://localhost:3000/create-preset -d '{"name":"obsidian_auto_unsigned"}' -H "Content-Type: application/json" | jq .
+> ```
+>
+> See the Troubleshooting & Limitations section below for an example and a short guide.
+
 Configure the following values in plugin settings:
 
 - **Cloud Name** — your Cloudinary cloud name

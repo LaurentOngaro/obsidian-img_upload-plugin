@@ -353,7 +353,17 @@ class CloudinarySettingTab extends PluginSettingTab {
           new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
           updateStatusIndicator();
         } else {
-          new Notice(`❌ Could not create preset: ${msg}`);
+          // Detect common fetch/CORS failures and provide explicit guidance + open the help modal
+          if (/failed to fetch|network|access-control-allow-origin/i.test(String(msg))) {
+            new Notice(
+              '❌ Could not create preset: Cloudinary management API appears blocked by CORS or network error. Open Help for manual instructions.'
+            );
+            // Open the help modal to guide the user
+            // eslint-disable-next-line no-new
+            new (CloudinaryHelpModal as any)(this.app).open();
+          } else {
+            new Notice(`❌ Could not create preset: ${msg}`);
+          }
           if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
         }
       }
