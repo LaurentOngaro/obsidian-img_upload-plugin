@@ -1,5 +1,6 @@
 # Build script for obsidian-img_upload-plugin
 # Handles version management and incremental build numbering
+# Note: Plugin folder is symlinked to vault, so no explicit copy needed
 
 param(
   [switch]$Clean = $false
@@ -28,22 +29,35 @@ if (Test-Path $versionFile) {
 # Save incremented build number
 $buildNumber | Out-File $versionFile -NoNewline -Encoding UTF8
 
-Write-Host '📦 Building obsidian-img_upload-plugin'
+Write-Host 'Building obsidian-img_upload-plugin'
 Write-Host "   Version: v$version"
 Write-Host "   Build #: $buildNumber"
 Write-Host ''
 
 # Create build-info.json for the plugin to read
+$buildTime = Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'
 $buildInfo = @{
   version     = $version
   buildNumber = $buildNumber
-  buildTime   = Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'
+  buildTime   = $buildTime
 } | ConvertTo-Json
 
 $buildInfo | Out-File '.\build-info.json' -Encoding UTF8
 
+# Also generate a TypeScript file that's embedded at build time so the plugin
+# can read version info in environments where fetch/read is not available
+$ts = @"
+// Auto-generated at build time. Do not edit by hand.
+export const BUILD_INFO = {
+  version: '$version',
+  buildNumber: $buildNumber,
+  buildTime: '$buildTime',
+};
+"@
+$ts | Out-File '.\src\generated-build-info.ts' -Encoding UTF8
+
 # Run esbuild
-Write-Host '▶️  Running esbuild...'
+Write-Host 'Running esbuild...'
 & npm run build
 
 if ($LASTEXITCODE -ne 0) {
@@ -52,6 +66,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ''
-Write-Host '✅ Build complete!'
+Write-Host 'Build complete!'
 Write-Host '   Output: main.js'
 Write-Host '   Info: build-info.json'
+Write-Host ''
+Write-Host 'Note: Files automatically synced to vault via symlink'

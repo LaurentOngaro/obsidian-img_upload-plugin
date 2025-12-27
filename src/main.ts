@@ -1,4 +1,5 @@
 import { Plugin, PluginSettingTab, App, Setting, Notice, MarkdownView, TFile, Modal } from 'obsidian';
+import { BUILD_INFO } from './generated-build-info';
 import { CloudinaryHelpModal } from './cloudinary-help-modal';
 import { CloudinaryUploader, ensureUploadPreset } from './cloudinary';
 import { pasteClipboardImage } from './paste';
@@ -185,28 +186,39 @@ export default class CloudinaryPlugin extends Plugin {
   }
 
   async loadBuildInfo() {
-    // Try multiple possible paths for build-info.json
-    const paths = [
-      './build-info.json', // Relative to current directory
-      './plugins/obsidian-img_upload-plugin/build-info.json', // Plugins folder
-      'build-info.json', // Root
-    ];
-
-    for (const path of paths) {
+    try {
+      // Prefer embedded build info generated at build time
       try {
-        const response = await fetch(path);
-        if (response.ok) {
-          this.buildInfo = await response.json();
+        if (typeof BUILD_INFO !== 'undefined' && BUILD_INFO && BUILD_INFO.version) {
+          this.buildInfo = BUILD_INFO as any;
+          if (this.settings?.debugLogs) console.log('[img_upload] loaded build info from embedded BUILD_INFO', this.buildInfo);
           return;
         }
       } catch (e) {
-        // Try next path
+        /* ignore if not available */
       }
-    }
 
-    // If all paths fail, use defaults
-    if (this.settings.debugLogs) {
-      console.log('[img_upload] build-info.json not found, using defaults');
+      // Fallback: try to load build-info.json via fetch
+      const possiblePaths = ['/build-info.json', './build-info.json', 'build-info.json'];
+      for (const path of possiblePaths) {
+        try {
+          const response = await fetch(path);
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.version && data.buildNumber !== undefined) {
+              this.buildInfo = data;
+              if (this.settings?.debugLogs) console.log('[img_upload] loaded build info from', path, ':', this.buildInfo);
+              return;
+            }
+          }
+        } catch (e) {
+          if (this.settings?.debugLogs) console.log('[img_upload] could not load build info from', path, e);
+        }
+      }
+
+      if (this.settings?.debugLogs) console.log('[img_upload] build-info.json not found, using defaults');
+    } catch (e) {
+      if (this.settings?.debugLogs) console.log('[img_upload] error loading build info:', e);
     }
   }
 
@@ -382,7 +394,7 @@ class CloudinarySettingTab extends PluginSettingTab {
     // Short note under Auto upload to clarify scope
     const autoUploadNote = containerEl.createDiv({ cls: 'setting-item' });
     autoUploadNote.createEl('div', {
-      text: '⚠️ Note : Seuls les fichiers **référencés dans une note ouverte** sont automatiquement uploadés.',
+      text: '⚠️ Note: Only files **referenced in an open note** are automatically uploaded.',
     });
 
     // Status indicator element
