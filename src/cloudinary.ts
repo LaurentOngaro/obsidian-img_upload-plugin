@@ -150,3 +150,25 @@ async function sha1Hex(input: string): Promise<string> {
     throw new Error('No SHA-1 implementation available');
   }
 }
+
+/**
+ * Ensure an unsigned upload preset exists (create if possible using provided credentials).
+ * Returns the preset name if created or available, otherwise undefined.
+ */
+export async function ensureUploadPreset(settings: any, uploaderCtor: any = CloudinaryUploader): Promise<string | undefined> {
+  if (!settings || !settings.autoUploadOnFileAdd) return undefined;
+  if (settings.uploadPreset) return settings.uploadPreset;
+  if (!(settings.allowStoreApiSecret && settings.apiKey && settings.apiSecret)) return undefined;
+
+  const presetName = 'obsidian_auto_unsigned';
+  try {
+    const uploader = new uploaderCtor({ cloud_name: settings.cloudName, api_key: settings.apiKey, api_secret: settings.apiSecret });
+    const res = await uploader.createUploadPreset(presetName);
+    return (res && res.name) || presetName;
+  } catch (e: any) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // If preset already exists, return the name
+    if (/already exists|already/i.test(msg)) return presetName;
+    throw e;
+  }
+}

@@ -1,5 +1,6 @@
-import { Plugin, PluginSettingTab, App, Setting, Notice, MarkdownView, TFile } from 'obsidian';
-import { CloudinaryUploader } from './cloudinary';
+import { Plugin, PluginSettingTab, App, Setting, Notice, MarkdownView, TFile, Modal } from 'obsidian';
+import { CloudinaryHelpModal } from './cloudinary-help-modal';
+import { CloudinaryUploader, ensureUploadPreset } from './cloudinary';
 import { pasteClipboardImage } from './paste';
 import { processFileCreate } from './file-handler';
 
@@ -107,39 +108,18 @@ export default class CloudinaryPlugin extends Plugin {
     try {
       if (this.settings.debugLogs) console.log('[img_upload] handleFileCreate called', file);
 
-      // If auto-upload is enabled but no uploadPreset is configured, and the user allows storing API secret,
-      // try to create an unsigned upload preset automatically for convenience.
-      if (
-        this.settings.autoUploadOnFileAdd &&
-        !this.settings.uploadPreset &&
-        this.settings.allowStoreApiSecret &&
-        this.settings.apiKey &&
-        this.settings.apiSecret
-      ) {
-        try {
-          const uploader = new CloudinaryUploader({
-            cloud_name: this.settings.cloudName,
-            api_key: this.settings.apiKey,
-            api_secret: this.settings.apiSecret,
-          });
-          const presetName = 'obsidian_auto_unsigned';
-          const res = await uploader.createUploadPreset(presetName);
-          // If API returns created preset object, use its name; otherwise fall back to requested name
-          this.settings.uploadPreset = (res && res.name) || presetName;
+      // Auto-create upload preset if possible using the helper in cloudinary.ts
+      try {
+        const preset = await ensureUploadPreset(this.settings, CloudinaryUploader as any);
+        if (preset) {
+          this.settings.uploadPreset = preset;
           await this.saveSettings();
-          new Notice(`✅ Created unsigned upload preset '${this.settings.uploadPreset}' and saved to settings`);
-        } catch (e: any) {
-          // If preset already exists (some accounts), we'll attempt to use the same name
-          const msg = e instanceof Error ? e.message : String(e);
-          if (/already exists|already/i.test(String(msg))) {
-            this.settings.uploadPreset = 'obsidian_auto_unsigned';
-            await this.saveSettings();
-            new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
-          } else {
-            new Notice(`⚠️ Could not create upload preset automatically: ${msg}`);
-            if (this.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
-          }
+          new Notice(`✅ Created/Retrieved unsigned upload preset '${preset}' and saved to settings`);
         }
+      } catch (e: any) {
+        const msg = e instanceof Error ? e.message : String(e);
+        new Notice(`⚠️ Could not auto-create upload preset: ${msg}`);
+        if (this.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
       }
 
       const notifyFn = (m: string) => {
@@ -253,6 +233,7 @@ class CloudinarySettingTab extends PluginSettingTab {
           .onChange(async (value: string) => {
             this.plugin.settings.uploadPreset = value;
             await this.plugin.saveSettings();
+            updateStatusIndicator();
           })
       )
       .addButton((btn: any) =>
@@ -271,12 +252,14 @@ class CloudinarySettingTab extends PluginSettingTab {
               this.plugin.settings.uploadPreset = (res && res.name) || name;
               await this.plugin.saveSettings();
               new Notice(`✅ Created upload preset '${this.plugin.settings.uploadPreset}'`);
+              updateStatusIndicator();
             } catch (e: any) {
               const msg = e instanceof Error ? e.message : String(e);
               if (/already exists|already/i.test(String(msg))) {
                 this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
                 await this.plugin.saveSettings();
                 new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
+                updateStatusIndicator();
               } else {
                 new Notice(`❌ Could not create preset: ${msg}`);
                 if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
@@ -321,11 +304,17 @@ class CloudinarySettingTab extends PluginSettingTab {
         })
       );
 
-    // Inline help for Auto-upload (link + create preset button)
+    // Inline help for Auto-upload (help link that opens a modal + create preset button)
     const autoHelp = containerEl.createDiv({ cls: 'setting-item' });
     autoHelp.createEl('div', { text: 'Tip: You need an unsigned Upload preset (or signed uploads) for auto-upload to work.' });
     const helpRow = autoHelp.createDiv({ cls: 'setting-item-control' });
-    const link = helpRow.createEl('a', { text: 'How to create an unsigned preset', href: 'https://cloudinary.com/documentation/upload_presets', attr: { target: '_blank' } });
+    const linkBtn = helpRow.createEl('button', { text: 'Help: create an unsigned preset' });
+    linkBtn.addEventListener('click', () => {
+      // Open the help modal
+      // CloudinaryHelpModal is defined below
+      // eslint-disable-next-line no-new
+      new (CloudinaryHelpModal as any)(this.app).open();
+    });
     helpRow.createEl('span', { text: ' ' });
     const presetBtn = helpRow.createEl('button', { text: 'Create preset (auto)' });
     presetBtn.addEventListener('click', async () => {
@@ -339,12 +328,14 @@ class CloudinarySettingTab extends PluginSettingTab {
         this.plugin.settings.uploadPreset = (res && res.name) || 'obsidian_auto_unsigned';
         await this.plugin.saveSettings();
         new Notice(`✅ Created upload preset '${this.plugin.settings.uploadPreset}'`);
+        updateStatusIndicator();
       } catch (e: any) {
         const msg = e instanceof Error ? e.message : String(e);
         if (/already exists|already/i.test(String(msg))) {
           this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
           await this.plugin.saveSettings();
           new Notice(`⚠️ Using existing upload preset 'obsidian_auto_unsigned'`);
+          updateStatusIndicator();
         } else {
           new Notice(`❌ Could not create preset: ${msg}`);
           if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
@@ -353,6 +344,29 @@ class CloudinarySettingTab extends PluginSettingTab {
     });
     // disable unless creds are available
     if (!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret)) presetBtn.setAttribute('disabled', '');
+
+    // Status indicator element
+    const statusRow = containerEl.createDiv({ cls: 'setting-item' });
+    statusRow.createEl('div', { text: 'Auto-upload status:' });
+    const statusEl = statusRow.createDiv({ cls: 'setting-item-control' });
+    const updateStatusIndicator = () => {
+      const hasPreset = !!(this.plugin && this.plugin.settings && this.plugin.settings.uploadPreset);
+      const hasSigned = !!(this.plugin && this.plugin.settings && this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret);
+      if (hasPreset || hasSigned) {
+        statusEl.innerText = ' Ready (green)';
+        statusEl.style.color = '#0b8457';
+      } else if (this.plugin && this.plugin.settings && this.plugin.settings.allowStoreApiSecret && (this.plugin.settings.apiKey || this.plugin.settings.apiSecret)) {
+        statusEl.innerText = ' Partial (yellow) — provide API Key & Secret';
+        statusEl.style.color = '#b8860b';
+      } else {
+        statusEl.innerText = ' Not configured (red) — add Upload preset or API Secret';
+        statusEl.style.color = '#c92c2c';
+      }
+    };
+    // run once to initialize
+    updateStatusIndicator();
+
+    // Whenever a relevant setting changes below, call updateStatusIndicator() to refresh the indicator.
 
     let folderText: any;
     new Setting(containerEl)
