@@ -15,7 +15,7 @@ export async function pasteClipboardImage(
   uploader?: { upload: (fileOrBlob: File | Blob, filename?: string) => Promise<string> },
   clipboard?: any
 ): Promise<PasteResult> {
-  const clipboardAPI = clipboard ?? (navigator.clipboard as any);
+  const clipboardAPI = clipboard ?? (typeof navigator !== 'undefined' ? (navigator as any).clipboard : undefined);
   if (!clipboardAPI || !clipboardAPI.read) throw new Error('Clipboard read not supported');
 
   const items: any[] = await clipboardAPI.read();
@@ -26,7 +26,8 @@ export async function pasteClipboardImage(
   const blob: Blob = await clipboardItem.getType(mime);
   const ext = mime.split('/')[1] || 'png';
   const filename = `image-${Date.now()}.${ext}`;
-  const file = new File([blob], filename, { type: mime });
+  // Some environments (Node in CI) don't expose `File`; fall back to Blob and pass filename to uploader
+  const fileOrBlob: File | Blob = typeof File !== 'undefined' ? new File([blob], filename, { type: mime }) : blob;
 
   const uploaderInstance =
     uploader ??
@@ -37,6 +38,6 @@ export async function pasteClipboardImage(
       api_secret: settings.allowStoreApiSecret ? settings.apiSecret || settings.api_secret : undefined,
     });
 
-  const url = await uploaderInstance.upload(file, filename);
+  const url = await uploaderInstance.upload(fileOrBlob, filename);
   return { url, filename };
 }
