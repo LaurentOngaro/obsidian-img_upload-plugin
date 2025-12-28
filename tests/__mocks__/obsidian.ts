@@ -42,6 +42,7 @@ export class TFile {
   path: string;
   name: string;
   extension: string;
+  basename: string;
 }
 
 export class Modal {

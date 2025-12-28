@@ -4,7 +4,7 @@
   "scripts": {
     "test:e2e": "vitest",
     "ci:checks": "npm run test:e2e -- --run && npm run build",
-    "build": "esbuild src/main.ts --bundle --outfile=main.js --platform=browser --format=cjs --external:obsidian",
+    "build": "powershell -ExecutionPolicy Bypass -File build.ps1",
     "build:win": "powershell -ExecutionPolicy Bypass -File build.ps1",
     "prepare": "husky install"
   },

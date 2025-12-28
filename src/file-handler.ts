@@ -1,9 +1,9 @@
-import { MarkdownView } from 'obsidian';
+import { MarkdownView, TFile } from 'obsidian';
 import { CloudinaryUploader } from './cloudinary';
+import { CloudinaryCache } from './cache';
 
 // Track warnings shown per runtime session to avoid spamming the user on startup
 let shownMissingAutoUploadWarning = false;
-let shownInvalidUploadPresetWarning = false;
 
 // Track files the plugin created during this session to avoid re-processing them
 const pluginCreatedFiles = new Set<string>();
@@ -13,7 +13,6 @@ const pluginCreatedFiles = new Set<string>();
  */
 export function resetAutoUploadWarnings() {
   shownMissingAutoUploadWarning = false;
-  shownInvalidUploadPresetWarning = false;
   pluginCreatedFiles.clear();
   try {
     (processFileCreate as any).uploadingPaths = new Set<string>();
@@ -24,398 +23,403 @@ export function resetAutoUploadWarnings() {
 
 /**
  * Mark a path as created by the plugin for a short window so the create handler ignores it.
- * Uses a longer timeout to ensure the create event is fully processed by Obsidian.
  */
 export function markPluginCreatedPath(path: string) {
-  pluginCreatedFiles.add(path);
-  // Remove after 2 seconds - gives time for the create event to be fully handled
-  // and prevents double-processing of generated files
-  setTimeout(() => pluginCreatedFiles.delete(path), 2 * 1000);
+  const normalized = path.replace(/\\/g, '/');
+  pluginCreatedFiles.add(normalized);
+  // Remove after 10 seconds to be safe
+  setTimeout(() => pluginCreatedFiles.delete(normalized), 10000);
 }
 
 export async function processFileCreate(
   app: any,
   settings: any,
-  file: any,
+  file: TFile,
   uploaderCtor: any = CloudinaryUploader,
   options: { notify?: (msg: string) => void; saveSettings?: (s?: any) => Promise<void> } = {}
 ) {
   const notify = options.notify ?? (() => {});
   const saveSettings = options.saveSettings ?? (async () => {});
 
-  if (settings?.debugLogs) console.log('[img_upload] processFileCreate called', { file, settings });
-
-  if (!file || !file.extension) {
-    if (settings?.debugLogs) console.log('[img_upload] skipping: missing extension or file', file);
-    return;
-  }
-  const ext = (file.extension || '').toLowerCase();
+  if (!file || !file.extension) return;
+  const ext = file.extension.toLowerCase();
   const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
-  if (!imageExts.includes(ext)) {
-    if (settings?.debugLogs) console.log('[img_upload] skipping: unsupported extension', ext);
+  if (!imageExts.includes(ext)) return;
+
+  // 1. STARTUP PROTECTION: Ignore files created more than 5 seconds ago
+  const now = Date.now();
+  const fileAgeMs = now - (file.stat?.ctime || now);
+  if (fileAgeMs > 5000) {
+    if (settings?.debugLogs) console.log('[img_upload] skipping old file (startup indexing):', file.path);
     return;
   }
 
-  const data = await app.vault.readBinary(file);
-  const sizeBytes = (data as any)?.byteLength ?? (data as any)?.length ?? 0;
-  if (settings?.debugLogs) console.log('[img_upload] file size bytes:', sizeBytes, 'maxMB:', settings.maxAutoUploadSizeMB);
-
-  // Helper: compute SHA-1 of binary data
-  async function computeSha1(buf: Uint8Array): Promise<string> {
-    if (typeof crypto !== 'undefined' && (crypto as any).subtle) {
-      const hashed = await (crypto as any).subtle.digest('SHA-1', buf);
-      return Array.from(new Uint8Array(hashed))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
+  // 2. LOOP PROTECTION: Ignore files created by the plugin itself
+  const normalizedPath = file.path.replace(/\\/g, '/');
+  if (pluginCreatedFiles.has(normalizedPath)) {
+    if (settings?.debugLogs) {
+      console.log('[img_upload] skipping: file was created by the plugin itself', {
+        path: file.path,
+        normalizedPath,
+        pluginCreatedFiles: Array.from(pluginCreatedFiles),
+      });
     }
-    try {
-      const nodeCrypto = await import('crypto');
-      // Type casting to any to satisfy TypeScript typing for Buffer
-      return (nodeCrypto as any)
-        .createHash('sha1')
-        .update(buf as any)
-        .digest('hex');
-    } catch (e) {
-      throw new Error('No SHA-1 implementation available');
-    }
-  }
-
-  // Ignore files the plugin just created to avoid infinite loops where a copied file triggers another copy/upload
-  if (pluginCreatedFiles.has(file.path)) {
-    if (settings?.debugLogs) console.log('[img_upload] skipping: file created by plugin itself', file.path);
     return;
   }
 
-  // In-flight guard to avoid concurrent uploads of the same path
-  // Initialize uploadingPaths if not exists
+  // 3. RE-ENTRY PROTECTION
   (processFileCreate as any).uploadingPaths = (processFileCreate as any).uploadingPaths || new Set<string>();
-
   if ((processFileCreate as any).uploadingPaths.has(file.path)) {
-    if (settings?.debugLogs) console.log('[img_upload] skipping: upload already in progress for', file.path);
+    if (settings?.debugLogs) console.log('[img_upload] skipping: already processing this path', file.path);
     return;
   }
-
-  // Mark this file as being processed to prevent duplicate processing
-  // Pre-mark before anything else to catch race conditions early
   (processFileCreate as any).uploadingPaths.add(file.path);
 
-  // Also mark in pluginCreatedFiles immediately to ensure we don't reprocess if
-  // this event is triggered multiple times before we're done
-  markPluginCreatedPath(file.path);
-
-  // Wrap everything in try/finally to ensure uploadingPaths cleanup even on early returns
   try {
-    // If a local copy folder is configured, skip files created inside that folder (we don't want to act on our own copies)
-    if (settings.localCopyEnabled && settings.localCopyFolder) {
-      try {
-        const folder = sanitizeFolderPath(settings.localCopyFolder);
-        // Normalize path separators: convert backslashes to forward slashes for consistent comparison
-        const normalizedFilePath = file.path.replace(/\\/g, '/');
-        if (folder && normalizedFilePath.startsWith(`${folder}/`)) {
-          if (settings?.debugLogs) console.log('[img_upload] skipping: file is inside localCopyFolder', file.path);
-          return;
+    // 4. REFERENCE CHECK: Only process if the file is referenced in the ACTIVE markdown note
+    let isReferenced = false;
+    let attempts = 0;
+
+    if (settings?.debugLogs) console.log('[img_upload] Waiting for reference in active note for:', file.path);
+
+    while (attempts < 30) {
+      const activeView = app.workspace.getActiveViewOfType?.(MarkdownView) as any;
+      if (activeView && activeView.editor) {
+        const content = activeView.editor.getValue() || '';
+        const fileName = file.name;
+        const baseName = file.basename;
+        const path = file.path;
+
+        // Check various ways Obsidian might link the file
+        if (
+          content.includes(path) ||
+          content.includes(fileName) ||
+          content.includes(`[[${fileName}]]`) ||
+          content.includes(`[[${baseName}]]`) ||
+          content.includes(`(${encodeURIComponent(path)})`) ||
+          content.includes(`(${encodeURIComponent(fileName)})`) ||
+          content.includes(`![[${fileName}]]`) ||
+          content.includes(`![[${baseName}]]`)
+        ) {
+          isReferenced = true;
+          if (settings?.debugLogs) console.log('[img_upload] Reference found for:', file.path, 'after', attempts, 'attempts');
+          break;
         }
-      } catch (e) {
-        // invalid folder path will be handled later when attempting to write, ignore here
       }
+      attempts++;
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    // Local copy will be performed after a successful upload. If auto-upload is disabled we'll perform the copy later in the function.
+    if (!isReferenced) {
+      if (settings?.debugLogs) console.log('[img_upload] skipping: file not referenced in active note after 3s', file.path);
+      return;
+    }
 
-    // Auto-upload guard: only attempt auto-upload if we have an upload preset (unsigned) or signed credentials (api_secret + api_key)
+    const data = await app.vault.readBinary(file);
+
+    // 5. UPLOAD LOGIC
+    let uploadedUrl: string | undefined;
     if (settings.autoUploadOnFileAdd && settings.cloudName) {
-      // Compute file hash once for cache checking and storage
-      let fileHash: string | undefined;
+      if (settings?.debugLogs) console.log('[img_upload] Triggering handleUpload for:', file.path);
+      uploadedUrl = await handleUpload(app, settings, file, data, uploaderCtor, notify, saveSettings);
+    }
 
-      // Only attempt auto-upload for files that are referenced in an open note or the active editor. This keeps uploads scoped to
-      // files you're actually editing or adding to notes (prevents mass uploads during vault indexing).
-      try {
-        const leaves = (app.workspace.getLeavesOfType && app.workspace.getLeavesOfType('markdown')) || [];
-        const activeView = app.workspace.getActiveViewOfType?.(MarkdownView) as any;
-        const hasOpenNotes = leaves.length > 0 || (!!activeView && activeView.editor);
-
-        // Strict behavior: require the file to be referenced in an open note (or the active editor).
-        // If there are no open notes or the file is not referenced, do not attempt auto-upload.
-        if (!hasOpenNotes) {
-          if (settings?.debugLogs) console.log('[img_upload] skipping upload: no open notes present to reference file', file.path);
-          return;
-        }
-
-        let referenced = false;
-        for (const leaf of leaves) {
-          const view = leaf.view as any;
-          if (view && view.editor) {
-            const content = view.editor.getValue() || '';
-            if (content.includes(file.path) || content.includes(file.name)) {
-              referenced = true;
-              break;
-            }
+    // 6. LOCAL COPY LOGIC
+    let localFile: TFile | undefined;
+    if (settings.localCopyEnabled && settings.localCopyFolder) {
+      const folder = sanitizeFolderPath(settings.localCopyFolder);
+      if (folder) {
+        const normalizedFilePath = file.path.replace(/\\/g, '/');
+        // Only copy if it's not already in the destination folder
+        if (!normalizedFilePath.startsWith(`${folder}/`)) {
+          if (settings?.debugLogs) console.log('[img_upload] Triggering handleLocalCopy for:', file.path, 'to folder:', folder);
+          const newPath = await handleLocalCopy(app, settings, file, data, notify);
+          if (newPath) {
+            localFile = app.vault.getAbstractFileByPath(newPath) as TFile;
           }
-        }
-
-        // Also check the active view just in case
-        if (!referenced && activeView && activeView.editor) {
-          const content = activeView.editor.getValue() || '';
-          if (content.includes(file.path) || content.includes(file.name)) referenced = true;
-        }
-
-        if (!referenced) {
-          if (settings?.debugLogs) console.log('[img_upload] skipping upload: file not referenced in open notes or active editor', file.path);
-          return;
-        }
-
-        // Compute file hash once and check persistent cache of uploaded files
-        fileHash = await computeSha1(data as Uint8Array);
-        if (!settings.uploadedFiles) settings.uploadedFiles = {};
-        const cached = settings.uploadedFiles[file.path];
-        if (cached && cached.hash === fileHash && cached.url) {
-          if (settings?.debugLogs) console.log('[img_upload] using cached upload for', file.path, cached.url);
-          // Replace local reference in active editor if present
-          if (replaceImageReference(app, file, cached.url, settings, notify, 'replaced with cached url')) {
-            notify('🔁 Replaced local image reference with cached Cloudinary URL in the current editor.');
-          }
-          return { cachedUrl: cached.url };
-        }
-      } catch (e) {
-        if (settings?.debugLogs) console.error('[img_upload] reference check error', e);
-        // If reference check fails for any reason, do not block auto-upload; fall through to existing checks
-      }
-      const canUnsigned = !!settings.uploadPreset;
-      const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
-      if (!canUnsigned && !canSigned) {
-        if (settings?.debugLogs) console.error('[img_upload] auto-upload skipped: missing upload_preset and API secret for signed uploads');
-        // Notify only once per session to avoid repeated notices on startup
-        if (!shownMissingAutoUploadWarning) {
-          notify(
-            '⚠️ Auto-upload skipped: configure an Upload preset (for unsigned uploads) or enable & set API Secret (for signed uploads) in plugin settings.'
-          );
-          shownMissingAutoUploadWarning = true;
-        }
-        return;
-      }
-      const maxMB = settings.maxAutoUploadSizeMB ?? 0;
-      if (maxMB > 0 && sizeBytes > maxMB * 1024 * 1024) {
-        if (settings?.debugLogs) console.log('[img_upload] skipping upload: exceeds size limit', { sizeBytes, maxMB });
-        notify(`⚠️ Skipping auto-upload: file exceeds max size (${maxMB} MB)`);
-        return;
-      }
-
-      const mime = getMimeFromExt(ext);
-      const blob = new Blob([data], { type: mime });
-
-      function getMimeFromExt(ext2: string): string {
-        switch ((ext2 || '').toLowerCase()) {
-          case 'jpg':
-          case 'jpeg':
-            return 'image/jpeg';
-          case 'png':
-            return 'image/png';
-          case 'gif':
-            return 'image/gif';
-          case 'webp':
-            return 'image/webp';
-          case 'svg':
-            return 'image/svg+xml';
-          default:
-            return 'application/octet-stream';
-        }
-      }
-
-      while (concurrentUploads >= MAX_CONCURRENT_UPLOADS) {
-        // simple backoff
-        // eslint-disable-next-line no-await-in-loop
-        await new Promise((r) => setTimeout(r, 200));
-      }
-
-      concurrentUploads++;
-
-      try {
-        const uploader = new uploaderCtor({
-          cloud_name: settings.cloudName,
-          api_key: settings.apiKey,
-          upload_preset: settings.uploadPreset,
-        });
-
-        if (settings?.debugLogs) console.log('[img_upload] starting upload for', file.name);
-        notify('⏳ Auto uploading image...');
-        const url = await uploader.upload(blob, file.name);
-        if (settings?.debugLogs) console.log('[img_upload] upload success', url);
-        notify(`✅ Image uploaded: ${url}`);
-
-        // Persist cache: store mapping with the already computed hash (in-memory + persist if saveSettings provided)
-        try {
-          settings.uploadedFiles = settings.uploadedFiles || {};
-          settings.uploadedFiles[file.path] = { url, hash: fileHash!, updatedAt: Date.now() } as any;
-          try {
-            await saveSettings(settings);
-          } catch (e) {
-            if (settings?.debugLogs) console.error('[img_upload] saveSettings failed', e);
-          }
-        } catch (e) {
-          if (settings?.debugLogs) console.error('[img_upload] compute hash for cache failed', e);
-        }
-
-        // After successful upload, perform local copy if enabled AND file is not already in the target folder
-        if (settings.localCopyEnabled && settings.localCopyFolder) {
-          try {
-            const folder = sanitizeFolderPath(settings.localCopyFolder);
-
-            // Skip copy if file is already in the destination folder
-            // Normalize path: convert backslashes to forward slashes for consistent comparison
-            const normalizedFilePath = file.path.replace(/\\/g, '/');
-            if (folder && normalizedFilePath.startsWith(`${folder}/`)) {
-              if (settings?.debugLogs) console.log('[img_upload] skipping local copy: file already in target folder', file.path);
-            } else {
-              const destPath = folder ? `${folder}/${file.name}` : file.name;
-
-              const exists = await app.vault.adapter.exists(destPath);
-              let finalPath = destPath;
-              if (exists) {
-                const timestamp = Date.now();
-                finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
-              }
-
-              // Mark the path as created by the plugin before creating it to avoid our create handler re-processing this file
-              try {
-                markPluginCreatedPath(finalPath);
-              } catch (err) {
-                // best-effort; ignore errors in marking
-                if (settings?.debugLogs) console.error('[img_upload] markPluginCreatedPath error', err);
-              }
-
-              await app.vault.createBinary(finalPath, data as any);
-              if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
-              notify(`✅ Copied image to ${finalPath}`);
-            }
-          } catch (e) {
-            if (settings?.debugLogs) console.error('[img_upload] copy local error after upload', e);
-            notify('❌ Could not copy image locally after upload: invalid folder path or permission error.');
-          }
-        }
-
-        // Replace image reference with Cloudinary URL
-        if (replaceImageReference(app, file, url, settings, notify, 'replaced')) {
-          notify('🔁 Replaced local image reference with Cloudinary URL in the current editor.');
-        }
-
-        return { uploadedUrl: url };
-      } catch (e: any) {
-        const message = e instanceof Error ? e.message : String(e);
-        if (settings?.debugLogs) console.error('[img_upload] upload error', e);
-
-        // Common Cloudinary guidance
-        if (typeof message === 'string' && /upload preset|unsigned/i.test(message)) {
-          // Show this guidance only once per session to avoid repeated notices when a preset exists but is not
-          // configured for unsigned uploads (Cloudinary returns 400 for each attempted file upload).
-          if (!shownInvalidUploadPresetWarning) {
-            shownInvalidUploadPresetWarning = true;
-            notify(
-              '❌ Upload failed: Upload preset is missing or unsigned upload not allowed. Check Settings → Upload preset or use the "Create preset (auto)" button (requires API Key & Secret).'
-            );
-          } else if (settings?.debugLogs) {
-            console.error('[img_upload] upload error (invalid preset) - repeated error suppressed', e);
-          }
-        } else if (typeof message === 'string' && /signature|api_secret/i.test(message)) {
-          notify('❌ Upload failed: signature error. Verify API Key/API Secret and signing configuration.');
         } else {
-          notify(`❌ Upload failed: ${message}`);
+          if (settings?.debugLogs) console.log('[img_upload] Skipping local copy: file is already in destination folder', file.path);
         }
-        return;
-      } finally {
-        concurrentUploads--;
       }
     }
 
-    // If auto-upload is disabled but localCopy is enabled, perform local copy
-    if (!settings.autoUploadOnFileAdd && settings.localCopyEnabled && settings.localCopyFolder) {
-      try {
-        const folder = sanitizeFolderPath(settings.localCopyFolder);
-        const destPath = folder ? `${folder}/${file.name}` : file.name;
+    // 7. REFERENCE REPLACEMENT
+    if (uploadedUrl) {
+      // If we uploaded, replace the reference with the URL
+      replaceImageReference(app, file, uploadedUrl, settings, notify, 'replaced');
 
-        const exists = await app.vault.adapter.exists(destPath);
-        let finalPath = destPath;
-        if (exists) {
-          const timestamp = Date.now();
-          finalPath = destPath.replace(`.${ext}`, `-${timestamp}.${ext}`);
-        }
-
-        await app.vault.createBinary(finalPath, data as any);
-        if (settings?.debugLogs) console.log('[img_upload] copied local file to', finalPath);
-        notify(`✅ Copied image to ${finalPath}`);
-      } catch (e) {
-        if (settings?.debugLogs) console.error('[img_upload] copy local error', e);
-        notify('❌ Could not copy image locally: invalid folder path or permission error.');
+      // If we made a local copy AND uploaded, we should also replace the reference to the local copy
+      if (localFile) {
+        replaceImageReference(app, localFile, uploadedUrl, settings, notify, 'replaced-local');
       }
+    } else if (localFile) {
+      // If we didn't upload but we made a local copy, replace the reference with the new local path
+      replaceImageReference(app, file, localFile.path, settings, notify, 'copied');
     }
+  } catch (err) {
+    if (settings?.debugLogs) console.error('[img_upload] processFileCreate error', err);
   } finally {
-    // Delay cleanup of uploadingPaths significantly to prevent re-entry from Obsidian's asynchronous create events
-    // The generated file's create event may arrive shortly after createBinary returns, and we need to ensure
-    // uploadingPaths is still present to gate duplicate processing
-    setTimeout(() => {
-      (processFileCreate as any).uploadingPaths?.delete(file.path);
-    }, 2000);
+    // Keep the path in uploadingPaths for a bit to prevent re-entry
+    setTimeout(() => (processFileCreate as any).uploadingPaths?.delete(file.path), 2000);
   }
 }
 
-let concurrentUploads = 0;
-const MAX_CONCURRENT_UPLOADS = 3;
+async function handleUpload(
+  app: any,
+  settings: any,
+  file: TFile,
+  data: ArrayBuffer,
+  uploaderCtor: any,
+  notify: (msg: string) => void,
+  saveSettings: (s: any) => Promise<void>
+): Promise<string | undefined> {
+  const fileHash = await computeSha1(new Uint8Array(data));
+
+  if (settings?.debugLogs) console.log('[img_upload] Checking cache for:', file.path, 'hash:', fileHash);
+
+  // 1. Check shared cache first (if configured)
+  if (settings.cacheFilePath) {
+    const sharedCache = new CloudinaryCache(app, settings.cacheFilePath);
+    const entry = await sharedCache.getEntry(fileHash);
+    if (entry) {
+      if (settings?.debugLogs) console.log('[img_upload] Shared cache hit:', entry.url);
+      return entry.url;
+    }
+  }
+
+  if (settings.uploadedFiles) {
+    // 1. Check by hash (most reliable for retries/moves)
+    const cachedByHash = settings.uploadedFiles[`hash:${fileHash}`];
+    if (cachedByHash && cachedByHash.url) {
+      if (settings?.debugLogs) console.log('[img_upload] Cache hit (hash):', cachedByHash.url);
+      return cachedByHash.url;
+    }
+    // 2. Check by path
+    const cachedByPath = settings.uploadedFiles[file.path];
+    if (cachedByPath && cachedByPath.hash === fileHash && cachedByPath.url) {
+      if (settings?.debugLogs) console.log('[img_upload] Cache hit (path):', cachedByPath.url);
+      return cachedByPath.url;
+    }
+    // 3. Check by name
+    const cachedByName = settings.uploadedFiles[`name:${file.name}`];
+    if (cachedByName && cachedByName.hash === fileHash && cachedByName.url) {
+      if (settings?.debugLogs) console.log('[img_upload] Cache hit (name):', cachedByName.url);
+      return cachedByName.url;
+    }
+  }
+
+  const canUnsigned = !!settings.uploadPreset;
+  const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
+  if (!canUnsigned && !canSigned) {
+    if (!shownMissingAutoUploadWarning) {
+      notify('⚠️ Auto-upload skipped: configure an Upload preset or API Secret in settings.');
+      shownMissingAutoUploadWarning = true;
+    }
+    return undefined;
+  }
+
+  const maxMB = settings.maxAutoUploadSizeMB ?? 0;
+  if (maxMB > 0 && data.byteLength > maxMB * 1024 * 1024) {
+    notify(`⚠️ Skipping auto-upload: file exceeds ${maxMB} MB`);
+    return undefined;
+  }
+
+  try {
+    const uploader = new uploaderCtor({
+      cloud_name: settings.cloudName,
+      api_key: settings.apiKey,
+      upload_preset: settings.uploadPreset,
+      api_secret: settings.allowStoreApiSecret ? settings.apiSecret : undefined,
+    });
+
+    if (settings?.debugLogs) console.log('[img_upload] Starting upload to Cloudinary for:', file.path);
+    notify('⏳ Auto uploading image...');
+
+    const url = await uploader.upload(new Blob([data], { type: getMimeFromExt(file.extension) }), file.name);
+
+    if (settings?.debugLogs) console.log('[img_upload] Upload successful:', url);
+
+    // Update settings object
+    settings.uploadedFiles = settings.uploadedFiles || {};
+    const entry = { url, hash: fileHash, updatedAt: Date.now() };
+    settings.uploadedFiles[file.path] = entry;
+    settings.uploadedFiles[`name:${file.name}`] = entry;
+    settings.uploadedFiles[`hash:${fileHash}`] = entry;
+
+    // Persist to disk
+    await saveSettings(settings);
+
+    // Update shared cache (if configured)
+    if (settings.cacheFilePath) {
+      const sharedCache = new CloudinaryCache(app, settings.cacheFilePath);
+      await sharedCache.addEntry(fileHash, {
+        url,
+        public_id: null,
+        filename: file.name,
+        uploader: 'obsidian-plugin',
+        uploaded_at: new Date().toISOString(),
+      });
+    }
+
+    notify(`✅ Image uploaded: ${url}`);
+    return url;
+  } catch (e: any) {
+    console.error('[img_upload] Upload failed:', e);
+    notify(`❌ Upload failed: ${e.message || String(e)}`);
+    return undefined;
+  }
+}
+
+async function ensureFolderExists(app: any, folderPath: string) {
+  const normalized = folderPath.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  let currentPath = '';
+  for (const part of parts) {
+    if (!part) continue;
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+    if (!(await app.vault.adapter.exists(currentPath))) {
+      await app.vault.createFolder(currentPath);
+    }
+  }
+}
+
+async function handleLocalCopy(app: any, settings: any, file: TFile, data: ArrayBuffer, notify: (msg: string) => void) {
+  try {
+    const folder = sanitizeFolderPath(settings.localCopyFolder);
+
+    if (folder) {
+      await ensureFolderExists(app, folder);
+    }
+
+    const destPath = folder ? `${folder}/${file.name}` : file.name;
+    const normalizedDest = destPath.replace(/\\/g, '/');
+
+    if (await app.vault.adapter.exists(normalizedDest)) {
+      // Check if the existing file has the same content to avoid unnecessary duplicates
+      const existingFile = app.vault.getAbstractFileByPath(normalizedDest);
+      if (existingFile instanceof TFile) {
+        const existingData = await app.vault.readBinary(existingFile);
+        const existingHash = await computeSha1(new Uint8Array(existingData));
+        const newHash = await computeSha1(new Uint8Array(data));
+        if (existingHash === newHash) {
+          if (settings?.debugLogs) console.log('[img_upload] Local copy: identical file already exists at:', normalizedDest);
+          return normalizedDest;
+        }
+      }
+
+      const timestamp = Date.now();
+      const finalPath = normalizedDest.replace(`.${file.extension}`, `-${timestamp}.${file.extension}`);
+      if (settings?.debugLogs) console.log('[img_upload] Local copy: file exists but different content, using timestamped path:', finalPath);
+      markPluginCreatedPath(finalPath);
+      await app.vault.createBinary(finalPath, data);
+      return finalPath;
+    } else {
+      if (settings?.debugLogs) console.log('[img_upload] Local copy: creating file at:', normalizedDest);
+      markPluginCreatedPath(normalizedDest);
+      await app.vault.createBinary(normalizedDest, data);
+      return normalizedDest;
+    }
+  } catch (e) {
+    if (settings?.debugLogs) console.error('[img_upload] handleLocalCopy error', e);
+    return undefined;
+  }
+}
+
+async function computeSha1(buf: Uint8Array): Promise<string> {
+  const hashed = await crypto.subtle.digest('SHA-1', buf as any);
+  return Array.from(new Uint8Array(hashed))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function getMimeFromExt(ext: string): string {
+  switch ((ext || '').toLowerCase()) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'svg':
+      return 'image/svg+xml';
+    default:
+      return 'application/octet-stream';
+  }
+}
 
 function escapeRegExp(str: string) {
-  // Escape all special regex characters including backslashes
+  if (!str) return '';
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * Replace image references in the active editor with a Cloudinary URL
- * @returns true if replacement was made, false otherwise
- */
 function replaceImageReference(
   app: any,
-  file: any,
+  file: TFile,
   replacementUrl: string,
   settings: any,
   notify: (msg: string) => void,
   logPrefix: string
 ): boolean {
-  const view = app.workspace.getActiveViewOfType?.(MarkdownView);
+  const view = app.workspace.getActiveViewOfType(MarkdownView);
   if (!view || !view.editor) return false;
 
   const content = view.editor.getValue();
-  const esc = escapeRegExp(file.path);
-  const fileName = escapeRegExp(file.name);
+  const escPath = escapeRegExp(file.path);
+  const escName = escapeRegExp(file.name);
+  const escBase = escapeRegExp(file.basename);
+
+  // Also handle encoded versions (spaces -> %20, etc)
+  const encPath = escapeRegExp(encodeURI(file.path));
+  const encName = escapeRegExp(encodeURI(file.name));
 
   let newContent = content;
 
-  // First try exact path match
-  const pathRegex = new RegExp(`!\\[([^\\]]*)\\]\\(${esc}\\)`, 'g');
-  if (content.match(pathRegex)) {
-    newContent = newContent.replace(pathRegex, `![$1](${replacementUrl})`);
-    if (settings?.debugLogs) console.log(`[img_upload] ${logPrefix} by path:`, file.path);
-  } else {
-    // Then try filename match (handles various path formats)
-    const nameRegex = new RegExp(`!\\[([^\\]]*)\\]\\([^)]*${fileName}[^)]*\\)`, 'g');
-    if (content.match(nameRegex)) {
-      newContent = newContent.replace(nameRegex, `![$1](${replacementUrl})`);
-      if (settings?.debugLogs) console.log(`[img_upload] ${logPrefix} by name:`, file.name);
+  // 1. Standard Markdown links: ![alt](path)
+  const markdownRegexes = [
+    new RegExp(`!\\[([^\\]]*)\\]\\(${escPath}\\)`, 'g'),
+    new RegExp(`!\\[([^\\]]*)\\]\\(${escName}\\)`, 'g'),
+    new RegExp(`!\\[([^\\]]*)\\]\\(${encPath}\\)`, 'g'),
+    new RegExp(`!\\[([^\\]]*)\\]\\(${encName}\\)`, 'g'),
+    new RegExp(`!\\[([^\\]]*)\\]\\([^)]*${escName}[^)]*\\)`, 'g'),
+  ];
+
+  // 2. Wikilinks: ![[path]] or ![[name]] or ![[name|alt]]
+  const wikiRegexes = [
+    new RegExp(`!\\[\\[${escPath}(\\|[^\\]]*)?\\]\\]`, 'g'),
+    new RegExp(`!\\[\\[${escName}(\\|[^\\]]*)?\\]\\]`, 'g'),
+    new RegExp(`!\\[\\[${escBase}(\\|[^\\]]*)?\\]\\]`, 'g'),
+    new RegExp(`!\\[\\[${encPath}(\\|[^\\]]*)?\\]\\]`, 'g'),
+    new RegExp(`!\\[\\[${encName}(\\|[^\\]]*)?\\]\\]`, 'g'),
+  ];
+
+  for (const regex of [...markdownRegexes, ...wikiRegexes]) {
+    if (newContent.match(regex)) {
+      if (settings?.debugLogs) console.log(`[img_upload] ${logPrefix}: found match with regex:`, regex.source);
+      // For wikilinks, we replace the whole ![[...]] with ![alt](url)
+      // If there's an alt text in wikilink ![[name|alt]], we try to preserve it
+      newContent = newContent.replace(regex, (match: string, alt: string) => {
+        const altText = alt ? alt.replace(/^\|/, '') : '';
+        return `![${altText}](${replacementUrl})`;
+      });
     }
   }
 
   if (newContent !== content) {
     view.editor.setValue(newContent);
+    if (settings?.debugLogs) console.log(`[img_upload] ${logPrefix}: replaced reference in note`);
     return true;
   }
 
-  if (settings?.debugLogs) {
-    console.log('[img_upload] no reference found to replace for', file.path);
-  }
+  if (settings?.debugLogs) console.log(`[img_upload] ${logPrefix}: no reference found in note for`, file.path);
   return false;
 }
 
 function sanitizeFolderPath(value: string): string {
   if (!value) return '';
-  // Reject paths with: .. (parent dir), absolute paths (/path or C:\path), or backslashes
-  if (/\.\.|^[A-Za-z]:[/\\]|^[/\\]/.test(value)) {
-    throw new Error('Invalid folder path: use relative paths only (e.g., "assets/images")');
-  }
-  return value.replace(/^[/\\]+|[/\\]+$/g, '');
+  const normalized = value.replace(/\\/g, '/');
+  if (/\.\.|^[A-Za-z]:[/\\]|^[/\\]/.test(normalized)) throw new Error('Invalid folder path');
+  return normalized.replace(/^[/\\]+|[/\\]+$/g, '');
 }

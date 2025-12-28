@@ -15,6 +15,8 @@ if (-not (Test-Path $manifestPath)) {
 
 $manifest = Get-Content $manifestPath | ConvertFrom-Json
 $version = $manifest.version
+$buildTime = Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'
+$outputFile = '.\src\generated-build-info.ts'
 
 # Initialize or read build number from VERSION file
 $versionFile = '.\VERSION'
@@ -34,15 +36,6 @@ Write-Host "   Version: v$version"
 Write-Host "   Build #: $buildNumber"
 Write-Host ''
 
-# Create build-info.json for the plugin to read
-$buildTime = Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'
-$buildInfo = @{
-  version     = $version
-  buildNumber = $buildNumber
-  buildTime   = $buildTime
-} | ConvertTo-Json
-
-$buildInfo | Out-File '.\build-info.json' -Encoding UTF8
 
 # Also generate a TypeScript file that's embedded at build time so the plugin
 # can read version info in environments where fetch/read is not available
@@ -54,11 +47,12 @@ export const BUILD_INFO = {
   buildTime: '$buildTime',
 };
 "@
-$ts | Out-File '.\src\generated-build-info.ts' -Encoding UTF8
+$ts | Out-File $outputFile -Encoding UTF8
 
 # Run esbuild
 Write-Host 'Running esbuild...'
-& npm run build
+# Invoke the esbuild CLI directly via Node to avoid any npm script recursion
+& node ./node_modules/esbuild/bin/esbuild src/main.ts --bundle --outfile=main.js --platform=browser --format=cjs --external:obsidian
 
 if ($LASTEXITCODE -ne 0) {
   Write-Error 'Build failed'
@@ -68,6 +62,6 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ''
 Write-Host 'Build complete!'
 Write-Host '   Output: main.js'
-Write-Host '   Info: build-info.json'
+Write-Host "   Info: $outputFile"
 Write-Host ''
 Write-Host 'Note: Files automatically synced to vault via symlink'

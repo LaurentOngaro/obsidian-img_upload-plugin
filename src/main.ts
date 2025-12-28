@@ -4,6 +4,7 @@ import { CloudinaryHelpModal } from './cloudinary-help-modal';
 import { CloudinaryUploader, ensureUploadPreset } from './cloudinary';
 import { pasteClipboardImage } from './paste';
 import { processFileCreate } from './file-handler';
+import { CloudinaryCache } from './cache';
 
 interface CloudinaryPluginSettings {
   cloudName: string;
@@ -20,6 +21,8 @@ interface CloudinaryPluginSettings {
   allowStoreApiSecret?: boolean;
   // Enable verbose debug logging and Notices for troubleshooting
   debugLogs?: boolean;
+  // Shared cache file path (relative to vault root)
+  cacheFilePath?: string;
   // Cache of uploaded files: path -> { url, hash, updatedAt }
   uploadedFiles?: Record<string, { url: string; hash: string; updatedAt: number }>;
 }
@@ -37,6 +40,7 @@ const DEFAULT_SETTINGS: CloudinaryPluginSettings = {
   localCopyFolder: '',
   maxAutoUploadSizeMB: 10, // default 10 MB
   debugLogs: false,
+  cacheFilePath: '_Helpers/cloudinary_cache.json',
   uploadedFiles: {},
 };
 
@@ -114,7 +118,8 @@ export default class CloudinaryPlugin extends Plugin {
       }
       new Notice('⏳ Uploading...');
 
-      const { url } = await pasteClipboardImage(this.settings, undefined, (navigator as any).clipboard);
+      const cache = this.settings.cacheFilePath ? new CloudinaryCache(this.app, this.settings.cacheFilePath) : undefined;
+      const { url } = await pasteClipboardImage(this.settings, undefined, (navigator as any).clipboard, cache);
 
       if (this.settings.debugLogs) {
         console.log('[img_upload] pasteImage: upload result', url);
@@ -239,40 +244,45 @@ class CloudinarySettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: '☁️ Cloudinary Settings' });
-
+    // Cloudinary Settings Header
+    containerEl.createEl('h3', { text: '☁️ Cloudinary Settings' });
+    // ---
+    containerEl.createEl('p', {
+      text: '📝 To get Cloudinary credentials (mandatory), see https://cloudinary.com/console/settings/api-keys',
+    });
     new Setting(containerEl)
       .setName('Cloud Name')
       .setDesc('Your Cloudinary cloud name')
-      .addText((text: any) =>
+      .addText((text: any) => {
+        text.inputEl.style.width = '150px';
         text
           .setPlaceholder('my-cloud')
           .setValue(this.plugin.settings.cloudName)
           .onChange(async (value: string) => {
             this.plugin.settings.cloudName = value;
             await this.plugin.saveSettings();
-          })
-      );
-
+          });
+      });
     new Setting(containerEl)
       .setName('API Key')
       .setDesc('Your Cloudinary API key (public)')
-      .addText((text: any) =>
+      .addText((text: any) => {
+        text.inputEl.style.width = '200px';
         text
           .setPlaceholder('abc123...')
           .setValue(this.plugin.settings.apiKey)
           .onChange(async (value: string) => {
             this.plugin.settings.apiKey = value;
             await this.plugin.saveSettings();
-          })
-      );
+          });
+      });
 
-    // Signed uploads section
-    containerEl.createEl('h3', { text: '🔐 Signed uploads (dangerous)' });
-
-    // Toggle: allow storing API Secret (dangerous)
+    // Signed upload settings header
+    containerEl.createEl('h3', { text: '🔐 Settings for Signed uploads (not recommended)' });
+    // ---
+    // Toggle: allow storing API Secret (not recommended)
     new Setting(containerEl)
-      .setName('Allow storing API Secret (dangerous)')
+      .setName('Allow storing API Secret (not recommended)')
       .setDesc(
         'When enabled, you may store your Cloudinary API secret in the plugin (NOT RECOMMENDED). This will enable signed uploads from the plugin.'
       )
@@ -294,7 +304,8 @@ class CloudinarySettingTab extends PluginSettingTab {
       .setDesc(
         'If you enabled storing API Secret above, enter it here. Storing the secret is dangerous — prefer unsigned uploads or server-side signing.'
       )
-      .addText((text: any) =>
+      .addText((text: any) => {
+        text.inputEl.style.width = '200px';
         text
           .setPlaceholder('xyz789...')
           .setValue(this.plugin.settings.apiSecret)
@@ -306,96 +317,12 @@ class CloudinarySettingTab extends PluginSettingTab {
             }
             this.plugin.settings.apiSecret = value;
             await this.plugin.saveSettings();
-          })
-      );
+          });
+      });
 
-    new Setting(containerEl)
-      .setName('Upload preset (recommended)')
-      .setDesc(
-        'Use an unsigned upload preset for unsigned uploads (recommended) or a signed upload preset (you must provide your API Secret) or use a server-side signer. If the plugin cannot create a preset due to CORS, create it manually in the Cloudinary Console or use the example server (Help).'
-      )
-      .addText((text: any) =>
-        text
-          .setPlaceholder('my_unsigned_preset')
-          .setValue(this.plugin.settings.uploadPreset || '')
-          .onChange(async (value: string) => {
-            this.plugin.settings.uploadPreset = value;
-            await this.plugin.saveSettings();
-            updateStatusIndicator();
-          })
-      )
-      .addButton((btn: any) =>
-        btn
-          .setButtonText('Create unsigned preset (auto)')
-          .setDisabled(!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret))
-          .onClick(async () => {
-            try {
-              const uploader = new CloudinaryUploader({
-                cloud_name: this.plugin.settings.cloudName,
-                api_key: this.plugin.settings.apiKey,
-                api_secret: this.plugin.settings.apiSecret,
-              });
-              const name = 'obsidian_auto_unsigned';
-              const res = await uploader.createUploadPreset(name);
-              this.plugin.settings.uploadPreset = (res && res.name) || name;
-              await this.plugin.saveSettings();
-              new Notice(`✅ Created unsigned upload preset '${this.plugin.settings.uploadPreset}'`);
-              updateStatusIndicator();
-            } catch (e: any) {
-              const msg = e instanceof Error ? e.message : String(e);
-              if (/already exists|already/i.test(String(msg))) {
-                this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
-                await this.plugin.saveSettings();
-                new Notice(`⚠️ Using existing unsigned upload preset 'obsidian_auto_unsigned'`);
-                updateStatusIndicator();
-              } else {
-                new Notice(`❌ Could not create unsigned preset: ${msg}`);
-                if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
-              }
-            }
-          })
-      );
-
-    // Merged tip under Upload preset: explains unsigned vs signed and provides Help / example server options
-    const presetHelp = containerEl.createDiv({ cls: 'setting-item' });
-    presetHelp.createEl('div', {
-      text: 'An unsigned Upload preset is required for unsigned uploads (recommended for safety). If the plugin cannot create the preset due to CORS, create it via the Cloudinary Console or use the example server (Help). If you prefer not to use an unsigned preset, you must enable signed uploads or configure a server-side signer.',
-    });
-    const presetHelpRow = presetHelp.createDiv({ cls: 'setting-item-control' });
-    const helpBtn2 = presetHelpRow.createEl('button', { text: 'Learn More' });
-    helpBtn2.addEventListener('click', () => {
-      // eslint-disable-next-line no-new
-      new (CloudinaryHelpModal as any)(this.app).open();
-    });
-    presetHelpRow.createEl('span', { text: ' ' });
-    const serverBtn2 = presetHelpRow.createEl('button', { text: 'Create via example server' });
-    serverBtn2.addEventListener('click', () => {
-      // eslint-disable-next-line no-new
-      new (CloudinaryHelpModal as any)(this.app).open();
-    });
-
-    // -- Auto-upload & local copy settings
-    new Setting(containerEl)
-      .setName('Auto upload on file add')
-      .setDesc('When enabled, new image files added to the vault will be uploaded automatically to Cloudinary.')
-      .addToggle((toggle: any) =>
-        toggle.setValue(!!this.plugin.settings.autoUploadOnFileAdd).onChange(async (value: boolean) => {
-          this.plugin.settings.autoUploadOnFileAdd = value;
-          await this.plugin.saveSettings();
-          // Warn user when enabling Auto Upload but neither upload preset nor signed credentials are configured
-          if (value && !this.plugin.settings.uploadPreset && !(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiSecret)) {
-            new Notice(
-              '⚠️ Auto upload enabled but no Upload preset or API Secret configured. Uploads will fail unless you add an upload preset or set an API Secret.'
-            );
-          }
-        })
-      );
-
-    // Short note under Auto upload to clarify scope
-    const autoUploadNote = containerEl.createDiv({ cls: 'setting-item' });
-    autoUploadNote.createEl('div', {
-      text: '⚠️ Note: Only files **referenced in an open note** are automatically uploaded.',
-    });
+    // Upload preset settings header
+    containerEl.createEl('h3', { text: 'Upload settings' });
+    // ---
 
     // Status indicator element
     const statusRow = containerEl.createDiv({ cls: 'setting-item' });
@@ -428,24 +355,103 @@ class CloudinarySettingTab extends PluginSettingTab {
     };
     // run once to initialize
     updateStatusIndicator();
-
-    // Debug logging toggle
     new Setting(containerEl)
-      .setName('Debug logs')
-      .setDesc('When enabled, verbose logs will be written to the console and additional Notices will be shown to help debugging.')
+      .setName('Upload preset (recommended)')
+      .setDesc(
+        'Use an unsigned upload preset for unsigned uploads (recommended) or a signed upload preset (you must provide your API Secret) or use a server-side signer. If the plugin cannot create a preset due to CORS, create it manually in the Cloudinary Console or use the example server (Help).'
+      )
+      .addText((text: any) => {
+        text.inputEl.style.width = '180px';
+        text
+          .setPlaceholder('my_unsigned_preset')
+          .setValue(this.plugin.settings.uploadPreset || '')
+          .onChange(async (value: string) => {
+            this.plugin.settings.uploadPreset = value;
+            await this.plugin.saveSettings();
+            updateStatusIndicator();
+          });
+      })
+      .addButton((btn: any) =>
+        btn
+          .setButtonText('Create unsigned preset (auto)')
+          .setDisabled(!(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiKey && this.plugin.settings.apiSecret))
+          .onClick(async () => {
+            try {
+              const uploader = new CloudinaryUploader({
+                cloud_name: this.plugin.settings.cloudName,
+                api_key: this.plugin.settings.apiKey,
+                api_secret: this.plugin.settings.apiSecret,
+              });
+              const name = 'obsidian_auto_unsigned';
+              const res = await uploader.createUploadPreset(name);
+              this.plugin.settings.uploadPreset = (res && res.name) || name;
+              await this.plugin.saveSettings();
+              new Notice(`✅ Created unsigned upload preset '${this.plugin.settings.uploadPreset}'`);
+              updateStatusIndicator();
+            } catch (e: any) {
+              const msg = e instanceof Error ? e.message : String(e);
+              if (/already exists|already/i.test(String(msg))) {
+                this.plugin.settings.uploadPreset = 'obsidian_auto_unsigned';
+                await this.plugin.saveSettings();
+                new Notice(`⚠️ Using existing unsigned upload preset 'obsidian_auto_unsigned'`);
+                updateStatusIndicator();
+              } else {
+                new Notice(`❌ Could not create unsigned preset: ${msg}`);
+                if (this.plugin.settings.debugLogs) console.error('[img_upload] createUploadPreset error', e);
+              }
+            }
+          })
+      );
+
+    const presetHelp = containerEl.createDiv({ cls: 'setting-item' });
+    const presetHelpText = presetHelp.createEl('div', {
+      text: '⚠️ Note: An upload preset is required for uploads. It can be signed or unsigned (recommended for safety). If the plugin cannot create the unsigned preset via the button above due to CORS error, create it via the Cloudinary Console or use the example server (Help). If you prefer not to use an unsigned preset, you must enable signed uploads or configure a server-side signer.',
+    });
+    presetHelpText.style.fontSize = '0.85em';
+    presetHelpText.style.color = 'var(--text-muted)';
+    const presetHelpRow = presetHelp.createDiv({ cls: 'setting-item-control' });
+    const helpBtn2 = presetHelpRow.createEl('button', { text: 'Learn More' });
+    helpBtn2.addEventListener('click', () => {
+      // eslint-disable-next-line no-new
+      new (CloudinaryHelpModal as any)(this.app).open();
+    });
+    presetHelpRow.createEl('span', { text: ' ' });
+    const serverBtn2 = presetHelpRow.createEl('button', { text: 'Create via example server' });
+    serverBtn2.addEventListener('click', () => {
+      // eslint-disable-next-line no-new
+      new (CloudinaryHelpModal as any)(this.app).open();
+    });
+
+    new Setting(containerEl)
+      .setName('Auto upload on file add')
+      .setDesc('When enabled, new image files added to the vault will be uploaded automatically to Cloudinary.')
       .addToggle((toggle: any) =>
-        toggle.setValue(!!this.plugin.settings.debugLogs).onChange(async (value: boolean) => {
-          this.plugin.settings.debugLogs = value;
+        toggle.setValue(!!this.plugin.settings.autoUploadOnFileAdd).onChange(async (value: boolean) => {
+          this.plugin.settings.autoUploadOnFileAdd = value;
           await this.plugin.saveSettings();
-          new Notice(`Debug logs ${value ? 'enabled' : 'disabled'}`);
+          // Warn user when enabling Auto Upload but neither upload preset nor signed credentials are configured
+          if (value && !this.plugin.settings.uploadPreset && !(this.plugin.settings.allowStoreApiSecret && this.plugin.settings.apiSecret)) {
+            new Notice(
+              '⚠️ Auto upload enabled but no Upload preset or API Secret configured. Uploads will fail unless you add an upload preset or set an API Secret.'
+            );
+          }
         })
       );
+
+    // Short note under Auto upload to clarify scope
+    const autoUploadNote = containerEl.createDiv({ cls: 'setting-item' });
+    const autoUploadNoteText = autoUploadNote.createEl('div', {
+      text: '⚠️ Note: Only files **referenced in an open note** are automatically uploaded.',
+    });
+    autoUploadNoteText.style.fontSize = '0.85em';
+    autoUploadNoteText.style.color = 'var(--text-muted)';
 
     // Max auto-upload size
     new Setting(containerEl)
       .setName('Max auto-upload size (MB)')
       .setDesc('Maximum file size (in MB) allowed for automatic uploads. Files larger will not be uploaded automatically.')
-      .addText((text: any) =>
+      .addText((text: any) => {
+        text.inputEl.style.width = '50px';
         text
           .setPlaceholder('10')
           .setValue(String(this.plugin.settings.maxAutoUploadSizeMB ?? 10))
@@ -457,44 +463,26 @@ class CloudinarySettingTab extends PluginSettingTab {
             }
             this.plugin.settings.maxAutoUploadSizeMB = num;
             await this.plugin.saveSettings();
-          })
-      );
-
-    let folderText: any;
-    new Setting(containerEl)
-      .setName('Enable local copy')
-      .setDesc('If enabled, a local copy of new images will be made into the folder below (optional).')
-      .addToggle((toggle: any) =>
-        toggle.setValue(!!this.plugin.settings.localCopyEnabled).onChange(async (value: boolean) => {
-          this.plugin.settings.localCopyEnabled = value;
-          await this.plugin.saveSettings();
-          if (folderText) folderText.setDisabled(!value);
-        })
-      );
-
-    new Setting(containerEl)
-      .setName('Local copy folder (relative to vault root)')
-      .setDesc('Example: assets/images — leave empty to use vault root. Only used when local copy is enabled.')
-      .addText((text: any) => {
-        folderText = text;
-        text
-          .setPlaceholder('assets/images')
-          .setValue(this.plugin.settings.localCopyFolder || '')
-          .setDisabled(!this.plugin.settings.localCopyEnabled)
-          .onChange(async (value: string) => {
-            // Validate folder path: disallow .., absolute paths (starting with /) and Windows drive letters like C:\
-            if (value && /\.\.|^[A-Za-z]:\\\\|^\//.test(value)) {
-              new Notice('Invalid folder path: do not use ".." or absolute paths. Please use a relative path like "assets/images".');
-              return;
-            }
-
-            // Normalize (remove leading/trailing slashes)
-            const sanitized = value.replace(/^\/+|\/+$/g, '');
-            this.plugin.settings.localCopyFolder = sanitized;
-            await this.plugin.saveSettings();
           });
       });
 
+    //
+    containerEl.createEl('h3', { text: 'Others settings' });
+    // ---
+    // Shared cache file path
+    new Setting(containerEl)
+      .setName('Shared cache file path')
+      .setDesc('Path to the shared JSON cache file (relative to vault root). Used to synchronize with other tools like updateArtIndex.py.')
+      .addText((text: any) => {
+        text.inputEl.style.width = '350px';
+        text
+          .setPlaceholder('_Helpers/cloudinary_cache.json')
+          .setValue(this.plugin.settings.cacheFilePath || '')
+          .onChange(async (value: string) => {
+            this.plugin.settings.cacheFilePath = value;
+            await this.plugin.saveSettings();
+          });
+      });
     // Maintenance tools: clear or export upload cache
     new Setting(containerEl)
       .setName('Maintenance')
@@ -517,11 +505,53 @@ class CloudinarySettingTab extends PluginSettingTab {
           }
         })
       );
+    // Local copy settings
+    let folderText: any;
+    new Setting(containerEl)
+      .setName('Enable local copy')
+      .setDesc('If enabled, a local copy of new images will be made into the folder below (optional).')
+      .addToggle((toggle: any) =>
+        toggle.setValue(!!this.plugin.settings.localCopyEnabled).onChange(async (value: boolean) => {
+          this.plugin.settings.localCopyEnabled = value;
+          await this.plugin.saveSettings();
+          if (folderText) folderText.setDisabled(!value);
+        })
+      );
+    // Local copy folder
+    new Setting(containerEl)
+      .setName('Local copy folder (relative to vault root)')
+      .setDesc('Example: assets/images — leave empty to use vault root. Only used when local copy is enabled.')
+      .addText((text: any) => {
+        folderText = text;
+        text.inputEl.style.width = '350px';
+        text
+          .setPlaceholder('assets/images')
+          .setValue(this.plugin.settings.localCopyFolder || '')
+          .setDisabled(!this.plugin.settings.localCopyEnabled)
+          .onChange(async (value: string) => {
+            // Validate folder path: disallow .., absolute paths (starting with /) and Windows drive letters like C:\
+            if (value && /\.\.|^[A-Za-z]:\\\\|^\//.test(value)) {
+              new Notice('Invalid folder path: do not use ".." or absolute paths. Please use a relative path like "assets/images".');
+              return;
+            }
 
-    containerEl.createEl('hr');
-    containerEl.createEl('p', {
-      text: '📝 Get credentials: https://cloudinary.com/console/settings/api-keys',
-    });
+            // Normalize (remove leading/trailing slashes)
+            const sanitized = value.replace(/^\/+|\/+$/g, '');
+            this.plugin.settings.localCopyFolder = sanitized;
+            await this.plugin.saveSettings();
+          });
+      });
+    // Debug logging toggle
+    new Setting(containerEl)
+      .setName('Debug logs')
+      .setDesc('When enabled, verbose logs will be written to the console and additional Notices will be shown to help debugging.')
+      .addToggle((toggle: any) =>
+        toggle.setValue(!!this.plugin.settings.debugLogs).onChange(async (value: boolean) => {
+          this.plugin.settings.debugLogs = value;
+          await this.plugin.saveSettings();
+          new Notice(`Debug logs ${value ? 'enabled' : 'disabled'}`);
+        })
+      );
 
     // Display build version at the bottom
     const versionContainer = containerEl.createDiv({ cls: 'setting-item' });
