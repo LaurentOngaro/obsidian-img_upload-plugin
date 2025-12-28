@@ -2,9 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.2] - 2025-12-28
+
+### Changed (For Obsidian Plugin Repository Compliance)
+
+- Updated display name to "Cloudinary Image Uploader".
+- Removed "v" prefix from version tags (CI updated to accept numeric tags).
+- change author url from "https://github.com/LaurentOngaro/obsidian-img_upload-plugin" to "https: //www.patreon.com/c/LaurentOngaro"
+- Bumped version to 1.1.2.
+
+No code changes; functionality is identical to 1.1.0.
+
 ## [1.1.1] - 2025-12-28
 
-### Changed
+### Changed  (For Obsidian Plugin Repository Compliance)
 
 - Renamed plugin id to `cloudinary-image-uploader` (updated `manifest.json`, `package.json`, README install path, and CI release artifact name).
 - Updated display name to "Cloudinary Image Uploader for Obsidian".

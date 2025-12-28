@@ -5,7 +5,7 @@
   "minAppVersion": "1.10.0",
   "description": "Upload images to Cloudinary with smart caching, duplicate detection, and source file deletion.",
   "author": "Laurent Ongaro",
-  "authorUrl": "https://github.com/LaurentOngaro/obsidian-img_upload-plugin",
+  "authorUrl": "https: //www.patreon.com/c/LaurentOngaro",
   "fundingUrl": "https://www.patreon.com/posts/how-to-help-me-116311776",
   "isDesktopOnly": false
 }
