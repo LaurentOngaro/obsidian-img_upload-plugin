@@ -131,8 +131,7 @@ function getWebCrypto(): Crypto | undefined {
   const gc = (globalThis as any).crypto;
   if (gc?.subtle) return gc as Crypto;
   try {
-    const req = (globalThis as any).require ?? (0, (globalThis as any).eval)('require');
-    const nodeCrypto = req ? req('node:crypto') ?? req('crypto') : undefined;
+    const nodeCrypto = getNodeCrypto();
     return nodeCrypto?.webcrypto as Crypto | undefined;
   } catch (e) {
     return undefined;
@@ -141,8 +140,20 @@ function getWebCrypto(): Crypto | undefined {
 
 function getNodeCrypto(): any {
   try {
-    const req = (globalThis as any).require ?? (0, (globalThis as any).eval)('require');
-    return req ? req('node:crypto') ?? req('crypto') : undefined;
+    const req = typeof require !== 'undefined' ? require : Function('try { return require; } catch (e) { return undefined; }')();
+
+    if (req) {
+      try {
+        return req('node:crypto');
+      } catch (e) {
+        try {
+          return req('crypto');
+        } catch (e2) {
+          return undefined;
+        }
+      }
+    }
+    return undefined;
   } catch (e) {
     return undefined;
   }
