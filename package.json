@@ -4,7 +4,7 @@
   "scripts": {
     "test:e2e": "vitest",
     "ci:checks": "npm run test:e2e -- --run && npm run build",
-    "build": "powershell -ExecutionPolicy Bypass -File build.ps1",
+    "build": "node scripts/build.js",
     "build:win": "powershell -ExecutionPolicy Bypass -File build.ps1",
     "prepare": "husky install"
   },
