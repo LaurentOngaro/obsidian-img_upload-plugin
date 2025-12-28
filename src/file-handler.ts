@@ -1,4 +1,4 @@
-import { MarkdownView, TFile } from 'obsidian';
+import { MarkdownView, TFile, TFolder } from 'obsidian';
 import { CloudinaryUploader } from './cloudinary';
 import { CloudinaryCache } from './cache';
 
@@ -7,6 +7,14 @@ let shownMissingAutoUploadWarning = false;
 
 // Track files the plugin created during this session to avoid re-processing them
 const pluginCreatedFiles = new Set<string>();
+
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+
+interface UploadResult {
+  url?: string;
+  fromCache: boolean;
+  hash: string;
+}
 
 /**
  * Reset warning flags (useful for tests)
@@ -43,8 +51,7 @@ export async function processFileCreate(
 
   if (!file || !file.extension) return;
   const ext = file.extension.toLowerCase();
-  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'];
-  if (!imageExts.includes(ext)) return;
+  if (!IMAGE_EXTENSIONS.has(ext)) return;
 
   // 1. STARTUP PROTECTION: Ignore files created more than 5 seconds ago
   const now = Date.now();
@@ -116,29 +123,53 @@ export async function processFileCreate(
     }
 
     const data = await app.vault.readBinary(file);
+    const fileHash = await computeSha1(new Uint8Array(data));
 
     // 5. UPLOAD LOGIC
     let uploadedUrl: string | undefined;
+    let uploadResult: UploadResult | undefined;
     if (settings.autoUploadOnFileAdd && settings.cloudName) {
       if (settings?.debugLogs) console.log('[img_upload] Triggering handleUpload for:', file.path);
-      uploadedUrl = await handleUpload(app, settings, file, data, uploaderCtor, notify, saveSettings);
+      uploadResult = await handleUpload(app, settings, file, data, uploaderCtor, notify, saveSettings, fileHash);
+      uploadedUrl = uploadResult?.url;
     }
 
     // 6. LOCAL COPY LOGIC
     let localFile: TFile | undefined;
     if (settings.localCopyEnabled && settings.localCopyFolder) {
-      const folder = sanitizeFolderPath(settings.localCopyFolder);
+      const rawFolder = settings.localCopyFolder;
+      let folder = '';
+      try {
+        folder = sanitizeFolderPath(rawFolder);
+      } catch (e) {
+        // Fallback: try a lenient normalization so we still attempt the copy instead of silently skipping
+        folder = String(rawFolder || '')
+          .replace(/\\/g, '/')
+          .replace(/^\/+|\/+$/g, '');
+        if (settings?.debugLogs) console.error('[img_upload] Invalid local copy folder path, using fallback normalization', e);
+      }
+
       if (folder) {
+        const duplicateIllustrationFile = await findExistingIllustration(app, fileHash, folder, settings);
+        if (duplicateIllustrationFile) {
+          localFile = duplicateIllustrationFile;
+          if (settings?.debugLogs) console.log('[img_upload] Local copy: identical file already present in destination folder, skipping new copy');
+        }
+
         const normalizedFilePath = file.path.replace(/\\/g, '/');
-        // Only copy if it's not already in the destination folder
-        if (!normalizedFilePath.startsWith(`${folder}/`)) {
+        // Only copy if it's not already in the destination folder and no identical file exists there
+        if (!normalizedFilePath.startsWith(`${folder}/`) && !duplicateIllustrationFile) {
           if (settings?.debugLogs) console.log('[img_upload] Triggering handleLocalCopy for:', file.path, 'to folder:', folder);
           const newPath = await handleLocalCopy(app, settings, file, data, notify);
           if (newPath) {
             localFile = app.vault.getAbstractFileByPath(newPath) as TFile;
           }
-        } else {
-          if (settings?.debugLogs) console.log('[img_upload] Skipping local copy: file is already in destination folder', file.path);
+        } else if (settings?.debugLogs) {
+          console.log('[img_upload] Skipping local copy: destination already satisfied', {
+            file: file.path,
+            folder,
+            reason: duplicateIllustrationFile ? 'duplicate-in-destination' : 'already-in-destination',
+          });
         }
       }
     }
@@ -156,6 +187,18 @@ export async function processFileCreate(
       // If we didn't upload but we made a local copy, replace the reference with the new local path
       replaceImageReference(app, file, localFile.path, settings, notify, 'copied');
     }
+
+    if (settings.deleteSourceAfterUpload && uploadedUrl) {
+      const localCopySatisfied = !settings.localCopyEnabled || !!localFile;
+      if (localCopySatisfied && file.path !== localFile?.path) {
+        try {
+          await app.vault.delete(file);
+          if (settings?.debugLogs) console.log('[img_upload] Deleted original file after upload', file.path);
+        } catch (e) {
+          if (settings?.debugLogs) console.error('[img_upload] Failed to delete original file', file.path, e);
+        }
+      }
+    }
   } catch (err) {
     if (settings?.debugLogs) console.error('[img_upload] processFileCreate error', err);
   } finally {
@@ -171,9 +214,10 @@ async function handleUpload(
   data: ArrayBuffer,
   uploaderCtor: any,
   notify: (msg: string) => void,
-  saveSettings: (s: any) => Promise<void>
-): Promise<string | undefined> {
-  const fileHash = await computeSha1(new Uint8Array(data));
+  saveSettings: (s: any) => Promise<void>,
+  precomputedHash?: string
+): Promise<UploadResult> {
+  const fileHash = precomputedHash ?? (await computeSha1(new Uint8Array(data)));
 
   if (settings?.debugLogs) console.log('[img_upload] Checking cache for:', file.path, 'hash:', fileHash);
 
@@ -183,7 +227,7 @@ async function handleUpload(
     const entry = await sharedCache.getEntry(fileHash);
     if (entry) {
       if (settings?.debugLogs) console.log('[img_upload] Shared cache hit:', entry.url);
-      return entry.url;
+      return { url: entry.url, fromCache: true, hash: fileHash };
     }
   }
 
@@ -194,13 +238,13 @@ async function handleUpload(
       notify('⚠️ Auto-upload skipped: configure an Upload preset or API Secret in settings.');
       shownMissingAutoUploadWarning = true;
     }
-    return undefined;
+    return { url: undefined, fromCache: false, hash: fileHash };
   }
 
   const maxMB = settings.maxAutoUploadSizeMB ?? 0;
   if (maxMB > 0 && data.byteLength > maxMB * 1024 * 1024) {
     notify(`⚠️ Skipping auto-upload: file exceeds ${maxMB} MB`);
-    return undefined;
+    return { url: undefined, fromCache: false, hash: fileHash };
   }
 
   try {
@@ -230,24 +274,13 @@ async function handleUpload(
         uploaded_at: new Date().toISOString(),
       });
     }
-    // Update shared cache (if configured)
-    if (settings.cacheFilePath) {
-      const sharedCache = new CloudinaryCache(app, settings.cacheFilePath);
-      await sharedCache.addEntry(fileHash, {
-        url,
-        public_id: null,
-        filename: file.name,
-        uploader: 'obsidian-plugin',
-        uploaded_at: new Date().toISOString(),
-      });
-    }
 
     notify(`✅ Image uploaded: ${url}`);
-    return url;
+    return { url, fromCache: false, hash: fileHash };
   } catch (e: any) {
     console.error('[img_upload] Upload failed:', e);
     notify(`❌ Upload failed: ${e.message || String(e)}`);
-    return undefined;
+    return { url: undefined, fromCache: false, hash: fileHash };
   }
 }
 
@@ -304,6 +337,38 @@ async function handleLocalCopy(app: any, settings: any, file: TFile, data: Array
     if (settings?.debugLogs) console.error('[img_upload] handleLocalCopy error', e);
     return undefined;
   }
+}
+
+async function findExistingIllustration(app: any, targetHash: string, folderPath: string, settings: any): Promise<TFile | undefined> {
+  if (!folderPath) return undefined;
+
+  try {
+    const exists = await app.vault.adapter.exists(folderPath);
+    if (!exists) {
+      await ensureFolderExists(app, folderPath);
+    }
+  } catch (e) {
+    if (settings?.debugLogs) console.error('[img_upload] Failed to ensure local copy folder exists', e);
+    return undefined;
+  }
+
+  const illustrationFolder = app.vault.getAbstractFileByPath(folderPath) as any;
+  const children = illustrationFolder && (illustrationFolder as any).children;
+  if (!children || !Array.isArray(children)) return undefined;
+
+  for (const child of children) {
+    if (child instanceof TFile && IMAGE_EXTENSIONS.has(child.extension?.toLowerCase?.())) {
+      try {
+        const existingData = await app.vault.readBinary(child);
+        const existingHash = await computeSha1(new Uint8Array(existingData));
+        if (existingHash === targetHash) return child;
+      } catch (e) {
+        if (settings?.debugLogs) console.error('[img_upload] Failed to inspect _Illustrations file', child?.path, e);
+      }
+    }
+  }
+
+  return undefined;
 }
 
 async function computeSha1(buf: Uint8Array): Promise<string> {

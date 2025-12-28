@@ -18,6 +18,7 @@ interface CloudinaryPluginSettings {
   allowStoreApiSecret?: boolean;
   debugLogs?: boolean;
   cacheFilePath?: string;
+  deleteSourceAfterUpload?: boolean;
 }
 
 export { processFileCreate } from './file-handler';
@@ -33,6 +34,7 @@ const DEFAULT_SETTINGS: CloudinaryPluginSettings = {
   maxAutoUploadSizeMB: 10,
   debugLogs: false,
   cacheFilePath: '_Helpers/cloudinary_cache.json',
+  deleteSourceAfterUpload: false,
 };
 
 export default class CloudinaryPlugin extends Plugin {

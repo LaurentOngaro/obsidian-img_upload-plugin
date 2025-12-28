@@ -328,6 +328,18 @@ export default class CloudinarySettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+    // Delete source after upload
+    new Setting(containerEl)
+      .setName('Delete original after upload')
+      .setDesc(
+        'When enabled, delete the source file after a successful upload and optional local copy. Pasted/dragged files often land in the vault root (depends on Obsidian attachment settings), so enable with care.'
+      )
+      .addToggle((toggle: any) =>
+        toggle.setValue(!!this.plugin.settings.deleteSourceAfterUpload).onChange(async (value: boolean) => {
+          this.plugin.settings.deleteSourceAfterUpload = value;
+          await this.plugin.saveSettings();
+        })
+      );
     // Debug logging toggle
     new Setting(containerEl)
       .setName('Debug logs')

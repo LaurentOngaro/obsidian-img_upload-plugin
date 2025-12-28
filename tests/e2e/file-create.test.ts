@@ -39,7 +39,7 @@ describe('processFileCreate', () => {
       },
     };
 
-    const settings: any = { localCopyEnabled: true, localCopyFolder: 'assets/images' };
+    const settings: any = { localCopyEnabled: true, localCopyFolder: 'assets/images', debugLogs: true };
 
     await processFileCreate(app, settings, file as any);
 
