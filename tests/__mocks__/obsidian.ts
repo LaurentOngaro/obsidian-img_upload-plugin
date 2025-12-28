@@ -39,10 +39,10 @@ export class Notice {
 }
 
 export class TFile {
-  path: string;
-  name: string;
-  extension: string;
-  basename: string;
+  path: string = '';
+  name: string = '';
+  extension: string = '';
+  basename: string = '';
 }
 
 export class Modal {
