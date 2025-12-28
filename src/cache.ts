@@ -50,7 +50,7 @@ export class CloudinaryCache {
           public_id: null,
           filename: null,
           uploaded_at: now,
-          uploader: 'migrated'
+          uploader: 'migrated',
         };
         needsWrite = true;
       } else {
@@ -62,7 +62,7 @@ export class CloudinaryCache {
             public_id: e.public_id ?? null,
             filename: e.filename ?? null,
             uploaded_at: e.uploaded_at ?? now,
-            uploader: e.uploader ?? 'unknown'
+            uploader: e.uploader ?? 'unknown',
           };
           needsWrite = true;
         } else {
@@ -111,8 +111,22 @@ export class CloudinaryCache {
   }
 
   static async calculateHash(data: ArrayBuffer): Promise<string> {
-    const hashBuffer = await crypto.subtle.digest('SHA-1', data);
+    const cryptoApi = getWebCrypto();
+    if (!cryptoApi?.subtle) throw new Error('WebCrypto not available');
+    const hashBuffer = await cryptoApi.subtle.digest('SHA-1', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+}
+
+function getWebCrypto(): Crypto | undefined {
+  const gc = (globalThis as any).crypto;
+  if (gc?.subtle) return gc as Crypto;
+  try {
+    const req = (globalThis as any).require ?? (0, (globalThis as any).eval)('require');
+    const nodeCrypto = req ? req('node:crypto') ?? req('crypto') : undefined;
+    return nodeCrypto?.webcrypto as Crypto | undefined;
+  } catch (e) {
+    return undefined;
   }
 }

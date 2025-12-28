@@ -13,7 +13,7 @@ describe('pasteClipboardImage', () => {
     const uploadMock = vi.fn().mockResolvedValue('https://res.cloudinary.com/demo/image/upload/v12345/image.png');
     const uploader = { upload: uploadMock };
 
-    const settings = { cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset' };
+    const settings = { cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', debugLogs: true };
 
     const result = await pasteClipboardImage(settings, uploader as any, clipboard as any);
 
@@ -23,11 +23,11 @@ describe('pasteClipboardImage', () => {
   });
 
   it('throws when clipboard not supported', async () => {
-    await expect(pasteClipboardImage({}, undefined, undefined)).rejects.toThrow('Clipboard read not supported');
+    await expect(pasteClipboardImage({ debugLogs: true }, undefined, undefined)).rejects.toThrow('Clipboard read not supported');
   });
 
   it('throws when no image in clipboard', async () => {
     const clipboard = { read: async () => [{ types: ['text/plain'], getType: async () => new Blob(['a'], { type: 'text/plain' }) }] };
-    await expect(pasteClipboardImage({}, undefined, clipboard as any)).rejects.toThrow('No image in clipboard');
+    await expect(pasteClipboardImage({ debugLogs: true }, undefined, clipboard as any)).rejects.toThrow('No image in clipboard');
   });
 });

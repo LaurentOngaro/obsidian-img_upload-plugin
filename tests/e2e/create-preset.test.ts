@@ -15,6 +15,7 @@ describe('createUploadPreset flow', () => {
         apiSecret: 'secret',
         allowStoreApiSecret: true,
         uploadPreset: '',
+        debugLogs: true,
       },
       saveSettings: vi.fn().mockResolvedValue(undefined),
       app: {
@@ -57,7 +58,7 @@ describe('createUploadPreset flow', () => {
       apiSecret: 'secret',
       allowStoreApiSecret: true,
       uploadPreset: '',
-      debugLogs: false,
+      debugLogs: true,
     };
 
     // Make createUploadPreset throw (e.g., CORS or network error)
@@ -115,7 +116,7 @@ describe('createUploadPreset flow', () => {
       apiSecret: 'secret',
       allowStoreApiSecret: true,
       uploadPreset: '',
-      debugLogs: false,
+      debugLogs: true,
     };
 
     // Simulate a CORS-like failure (fetch throws TypeError 'Failed to fetch')

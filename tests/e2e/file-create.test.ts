@@ -34,7 +34,7 @@ describe('processFileCreate', () => {
       },
       workspace: {
         getActiveViewOfType: vi.fn().mockReturnValue({
-          editor: { getValue: () => `![image](${file.path})` },
+          editor: { getValue: () => `![image](${file.path})`, setValue: vi.fn() },
         }),
       },
     };
@@ -81,7 +81,14 @@ describe('processFileCreate', () => {
       workspace: { getActiveViewOfType: vi.fn().mockReturnValue({ editor }) },
     });
 
-    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', maxAutoUploadSizeMB: 2 };
+    const settings: any = {
+      autoUploadOnFileAdd: true,
+      cloudName: 'demo',
+      apiKey: 'key',
+      uploadPreset: 'preset',
+      maxAutoUploadSizeMB: 2,
+      debugLogs: true,
+    };
 
     await processFileCreate(appWithEditor, settings, file as any, MockUploader as any);
 
@@ -123,7 +130,14 @@ describe('processFileCreate', () => {
       workspace: { getActiveViewOfType: vi.fn().mockReturnValue({ editor }) },
     });
 
-    const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', maxAutoUploadSizeMB: 1 };
+    const settings: any = {
+      autoUploadOnFileAdd: true,
+      cloudName: 'demo',
+      apiKey: 'key',
+      uploadPreset: 'preset',
+      maxAutoUploadSizeMB: 1,
+      debugLogs: true,
+    };
 
     await processFileCreate(appWithEditor, settings, file as any, MockUploader as any);
 

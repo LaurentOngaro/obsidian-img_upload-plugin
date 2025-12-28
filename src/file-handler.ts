@@ -372,10 +372,25 @@ async function findExistingIllustration(app: any, targetHash: string, folderPath
 }
 
 async function computeSha1(buf: Uint8Array): Promise<string> {
-  const hashed = await crypto.subtle.digest('SHA-1', buf as any);
+  const cryptoApi = getWebCrypto();
+  if (!cryptoApi?.subtle) throw new Error('WebCrypto not available');
+  const hashed = await cryptoApi.subtle.digest('SHA-1', buf as any);
   return Array.from(new Uint8Array(hashed))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+}
+
+function getWebCrypto(): Crypto | undefined {
+  const gc = (globalThis as any).crypto;
+  if (gc?.subtle) return gc as Crypto;
+  try {
+    // Avoid bundler resolution by constructing require at runtime
+    const req = (globalThis as any).require ?? (0, (globalThis as any).eval)('require');
+    const nodeCrypto = req ? req('node:crypto') ?? req('crypto') : undefined;
+    return nodeCrypto?.webcrypto as Crypto | undefined;
+  } catch (e) {
+    return undefined;
+  }
 }
 
 function getMimeFromExt(ext: string): string {
@@ -410,7 +425,7 @@ function replaceImageReference(
   logPrefix: string
 ): boolean {
   const view = app.workspace.getActiveViewOfType(MarkdownView);
-  if (!view || !view.editor) return false;
+  if (!view || !view.editor || typeof (view as any).editor.setValue !== 'function') return false;
 
   const content = view.editor.getValue();
   const escPath = escapeRegExp(file.path);
