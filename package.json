@@ -1,6 +1,6 @@
 {
-  "name": "obsidian-img_upload-plugin",
-  "version": "1.1.0",
+  "name": "cloudinary-image-uploader",
+  "version": "1.1.1",
   "scripts": {
     "test:e2e": "vitest",
     "ci:checks": "npm run test:e2e -- --run && npm run build",

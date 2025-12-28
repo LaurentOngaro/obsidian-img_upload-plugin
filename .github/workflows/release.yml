@@ -34,7 +34,7 @@ jobs:
         run: |
           mkdir -p release
           TAG=${GITHUB_REF#refs/tags/}
-          zip -r "release/obsidian-img_upload-plugin-${TAG}.zip" main.js manifest.json README.md LICENSE package.json
+          zip -r "release/cloudinary-image-uploader-${TAG}.zip" main.js manifest.json README.md LICENSE package.json
 
       - name: Create Release (via REST)
         id: create_release
@@ -62,7 +62,7 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const filePath = `release/obsidian-img_upload-plugin-${process.env.GITHUB_REF_NAME || '${{ github.ref_name }}'}.zip`;
+            const filePath = `release/cloudinary-image-uploader-${process.env.GITHUB_REF_NAME || '${{ github.ref_name }}'}.zip`;
             const content = fs.readFileSync(filePath);
             const releaseId = '${{ steps.create_release.outputs.release_id }}' || (await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag: process.env.GITHUB_REF_NAME || '${{ github.ref_name }}' })).data.id;
             await github.rest.repos.uploadReleaseAsset({

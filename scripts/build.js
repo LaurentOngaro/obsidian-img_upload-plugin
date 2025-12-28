@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Cross-platform build script for obsidian-img_upload-plugin */
+/* Cross-platform build script for cloudinary-image-uploader */
 const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
@@ -45,7 +45,7 @@ async function main() {
   const buildNumber = await ensureBuildNumber(versionFile);
   await fs.promises.writeFile(versionFile, String(buildNumber), 'utf8');
 
-  console.log('Building obsidian-img_upload-plugin');
+  console.log('Building cloudinary-image-uploader');
   console.log(`   Version: v${version}`);
   console.log(`   Build #: ${buildNumber}`);
   console.log('');

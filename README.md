@@ -28,7 +28,7 @@ You can install this plugin directly from the GitHub repository:
    - Windows: run `build.bat` at the repository root
    - Or run: `npm run build`
 3. Copy the plugin to your vault:
-   - Create (if needed) `<your-vault>/.obsidian/plugins/obsidian-img_upload-plugin`
+   - Create (if needed) `<your-vault>/.obsidian/plugins/cloudinary-image-uploader`
    - Copy the repository contents (including `main.js`, `manifest.json`) into that folder
 4. In Obsidian: Settings → Community Plugins → disable Safe Mode if enabled → enable **Cloud Image Uploader** in the list of installed plugins.
 

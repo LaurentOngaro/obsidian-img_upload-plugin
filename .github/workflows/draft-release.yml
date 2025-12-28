@@ -32,7 +32,7 @@ jobs:
         run: |
           mkdir -p release
           TAG=draft-${{ github.run_number }}-${{ github.sha }}
-          zip -r "release/obsidian-img_upload-plugin-${TAG}.zip" main.js manifest.json README.md LICENSE package.json
+          zip -r "release/cloudinary-image-uploader-${TAG}.zip" main.js manifest.json README.md LICENSE package.json
 
       - name: Create draft release (via REST)
         id: create_release
@@ -61,7 +61,7 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const filePath = `release/obsidian-img_upload-plugin-draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}.zip`;
+            const filePath = `release/cloudinary-image-uploader-draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}.zip`;
             const content = fs.readFileSync(filePath);
             const releaseId = '${{ steps.create_release.outputs.release_id }}' || (await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag: `draft-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_SHA}` })).data.id;
             await github.rest.repos.uploadReleaseAsset({

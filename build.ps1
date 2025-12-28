@@ -1,4 +1,4 @@
-# Build script for obsidian-img_upload-plugin
+# Build script for cloudinary-image-uploader
 # Handles version management and incremental build numbering
 # Note: Plugin folder is symlinked to vault, so no explicit copy needed
 
@@ -31,7 +31,7 @@ if (Test-Path $versionFile) {
 # Save incremented build number
 $buildNumber | Out-File $versionFile -NoNewline -Encoding UTF8
 
-Write-Host 'Building obsidian-img_upload-plugin'
+Write-Host 'Building cloudinary-image-uploader'
 Write-Host "   Version: v$version"
 Write-Host "   Build #: $buildNumber"
 Write-Host ''
