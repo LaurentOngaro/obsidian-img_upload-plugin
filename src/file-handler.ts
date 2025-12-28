@@ -187,27 +187,6 @@ async function handleUpload(
     }
   }
 
-  if (settings.uploadedFiles) {
-    // 1. Check by hash (most reliable for retries/moves)
-    const cachedByHash = settings.uploadedFiles[`hash:${fileHash}`];
-    if (cachedByHash && cachedByHash.url) {
-      if (settings?.debugLogs) console.log('[img_upload] Cache hit (hash):', cachedByHash.url);
-      return cachedByHash.url;
-    }
-    // 2. Check by path
-    const cachedByPath = settings.uploadedFiles[file.path];
-    if (cachedByPath && cachedByPath.hash === fileHash && cachedByPath.url) {
-      if (settings?.debugLogs) console.log('[img_upload] Cache hit (path):', cachedByPath.url);
-      return cachedByPath.url;
-    }
-    // 3. Check by name
-    const cachedByName = settings.uploadedFiles[`name:${file.name}`];
-    if (cachedByName && cachedByName.hash === fileHash && cachedByName.url) {
-      if (settings?.debugLogs) console.log('[img_upload] Cache hit (name):', cachedByName.url);
-      return cachedByName.url;
-    }
-  }
-
   const canUnsigned = !!settings.uploadPreset;
   const canSigned = !!(settings.allowStoreApiSecret && settings.apiSecret && settings.apiKey);
   if (!canUnsigned && !canSigned) {
@@ -239,16 +218,18 @@ async function handleUpload(
 
     if (settings?.debugLogs) console.log('[img_upload] Upload successful:', url);
 
-    // Update settings object
-    settings.uploadedFiles = settings.uploadedFiles || {};
-    const entry = { url, hash: fileHash, updatedAt: Date.now() };
-    settings.uploadedFiles[file.path] = entry;
-    settings.uploadedFiles[`name:${file.name}`] = entry;
-    settings.uploadedFiles[`hash:${fileHash}`] = entry;
-
-    // Persist to disk
-    await saveSettings(settings);
-
+    // Persist only to shared cache (if configured) — settings no longer stores per-plugin cache entries.
+    // Update shared cache (if configured)
+    if (settings.cacheFilePath) {
+      const sharedCache = new CloudinaryCache(app, settings.cacheFilePath);
+      await sharedCache.addEntry(fileHash, {
+        url,
+        public_id: null,
+        filename: file.name,
+        uploader: 'obsidian-plugin',
+        uploaded_at: new Date().toISOString(),
+      });
+    }
     // Update shared cache (if configured)
     if (settings.cacheFilePath) {
       const sharedCache = new CloudinaryCache(app, settings.cacheFilePath);

@@ -76,15 +76,18 @@ describe('processFileCreate', () => {
       upload = vi.fn().mockResolvedValue(url);
     }
 
+    const editor: any = { getValue: () => `![](${file.path})`, setValue: vi.fn() };
+    const appWithEditor: any = Object.assign({}, app, {
+      workspace: { getActiveViewOfType: vi.fn().mockReturnValue({ editor }) },
+    });
+
     const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', maxAutoUploadSizeMB: 2 };
 
-    const result: any = await processFileCreate(app, settings, file as any, MockUploader as any);
+    await processFileCreate(appWithEditor, settings, file as any, MockUploader as any);
 
-    // result is now undefined because processFileCreate doesn't return anything anymore (it's fire-and-forget)
-    // but we can check if settings.uploadedFiles was updated
-    expect(settings.uploadedFiles).toBeTruthy();
-    expect(settings.uploadedFiles[file.path]).toBeTruthy();
-    expect(settings.uploadedFiles[file.path].url).toBe(url);
+    // Ensure the editor was updated with the uploaded URL
+    expect(editor.setValue).toHaveBeenCalled();
+    expect(editor.setValue.mock.calls[0][0]).toContain(url);
   });
 
   it('skips upload when file exceeds size limit', async () => {
@@ -115,11 +118,16 @@ describe('processFileCreate', () => {
       upload = vi.fn();
     }
 
+    const editor: any = { getValue: () => `![](${file.path})`, setValue: vi.fn() };
+    const appWithEditor: any = Object.assign({}, app, {
+      workspace: { getActiveViewOfType: vi.fn().mockReturnValue({ editor }) },
+    });
+
     const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', maxAutoUploadSizeMB: 1 };
 
-    await processFileCreate(app, settings, file as any, MockUploader as any);
+    await processFileCreate(appWithEditor, settings, file as any, MockUploader as any);
 
-    expect(settings.uploadedFiles).toBeUndefined();
+    expect(editor.setValue).not.toHaveBeenCalled();
   });
 
   it('works with debugLogs enabled and still uploads', async () => {
@@ -150,10 +158,15 @@ describe('processFileCreate', () => {
       upload = vi.fn().mockResolvedValue(url);
     }
 
+    const editor: any = { getValue: () => `![](${file.path})`, setValue: vi.fn() };
+    const appWithEditor: any = Object.assign({}, app, {
+      workspace: { getActiveViewOfType: vi.fn().mockReturnValue({ editor }) },
+    });
+
     const settings: any = { autoUploadOnFileAdd: true, cloudName: 'demo', apiKey: 'key', uploadPreset: 'preset', debugLogs: true };
 
-    await processFileCreate(app, settings, file as any, MockUploader as any);
+    await processFileCreate(appWithEditor, settings, file as any, MockUploader as any);
 
-    expect(settings.uploadedFiles[file.path].url).toBe(url);
+    expect(editor.setValue.mock.calls[0][0]).toContain(url);
   });
 });

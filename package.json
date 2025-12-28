@@ -1,6 +1,6 @@
 {
   "name": "obsidian-img_upload-plugin",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "scripts": {
     "test:e2e": "vitest",
     "ci:checks": "npm run test:e2e -- --run && npm run build",

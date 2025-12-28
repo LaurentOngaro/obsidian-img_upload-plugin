@@ -42,7 +42,7 @@ Notes:
 
 1. Create a Cloudinary account at https://cloudinary.com/
 2. Go to _Console → Dashboard_ to obtain your **Cloud name** and **API key** (and API secret if you plan to sign uploads server-side).
-
+   The plugin settings include an **Open Cloudinary API Keys** button which opens the Cloudinary Console to the API Keys page (Settings → Cloud Image Uploader).
 3. Recommended (no secret exposure): create an **unsigned upload preset** in Cloudinary (under _Settings → Upload_ → _Upload presets_) and use that preset name in the plugin settings.
 
    To create an unsigned preset:
@@ -111,8 +111,7 @@ Configure the following values in plugin settings:
 ### Example: minimal Express signing server
 
 Below is a tiny example you can run to provide signatures to the plugin (or to any trusted client). **Run it only on a trusted server and over HTTPS.**
-
-- Create file `examples/signing-server/server.js` and set the env var `CLOUDINARY_API_SECRET` before running.
+Create file `examples/signing-server/server.js` and set the env var `CLOUDINARY_API_SECRET` before running.
 
 ```js
 // Minimal example (express)
@@ -146,7 +145,6 @@ Security notes:
 The plugin offers two choices for uploads to Cloudinary:
 
 1. **Unsigned uploads (recommended)** — do **not** store `api_secret` in the plugin; configure **Cloud Name** + **Upload preset** and uploads will be unsigned.
-
 2. **Signed uploads (dangerous)** — enable **Allow storing API Secret (dangerous)** in the plugin settings and enter your **API Secret**.
    - The plugin will use the secret to compute request signatures locally and perform signed uploads.
    - **Warning:** storing the secret in your local settings exposes it to anyone with access to your vault or machine.
@@ -166,10 +164,6 @@ Pre-commit checks
 
 - This repository installs a Git pre-commit hook (via Husky) that runs the same CI checks as our GitHub Actions: it runs the e2e tests and builds the plugin. Commits will be blocked if tests or build fail.
 - To enable hooks locally, run `npm install` (this runs `husky install` via the `prepare` script). You can bypass pre-commit hooks with `git commit --no-verify` (not recommended).
-
----
-
-If you want, I can also add an example server snippet for signed uploads and automated tests for the clipboard handling.
 
 ## Testing (E2E)
 
