@@ -373,11 +373,19 @@ async function findExistingIllustration(app: any, targetHash: string, folderPath
 
 async function computeSha1(buf: Uint8Array): Promise<string> {
   const cryptoApi = getWebCrypto();
-  if (!cryptoApi?.subtle) throw new Error('WebCrypto not available');
-  const hashed = await cryptoApi.subtle.digest('SHA-1', buf as any);
-  return Array.from(new Uint8Array(hashed))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+  if (cryptoApi?.subtle) {
+    const hashed = await cryptoApi.subtle.digest('SHA-1', buf as any);
+    return Array.from(new Uint8Array(hashed))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  }
+
+  const nodeCrypto = getNodeCrypto();
+  if (nodeCrypto?.createHash) {
+    return nodeCrypto.createHash('sha1').update(Buffer.from(buf)).digest('hex');
+  }
+
+  throw new Error('WebCrypto not available');
 }
 
 function getWebCrypto(): Crypto | undefined {
@@ -388,6 +396,15 @@ function getWebCrypto(): Crypto | undefined {
     const req = (globalThis as any).require ?? (0, (globalThis as any).eval)('require');
     const nodeCrypto = req ? req('node:crypto') ?? req('crypto') : undefined;
     return nodeCrypto?.webcrypto as Crypto | undefined;
+  } catch (e) {
+    return undefined;
+  }
+}
+
+function getNodeCrypto(): any {
+  try {
+    const req = (globalThis as any).require ?? (0, (globalThis as any).eval)('require');
+    return req ? req('node:crypto') ?? req('crypto') : undefined;
   } catch (e) {
     return undefined;
   }
