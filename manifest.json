@@ -1,7 +1,7 @@
 {
   "id": "cloudinary-image-uploader",
-  "name": "Cloudinary Image Uploader for Obsidian",
-  "version": "1.1.1",
+  "name": "Cloudinary Image Uploader",
+  "version": "1.1.2",
   "minAppVersion": "1.10.0",
   "description": "Upload images to Cloudinary with smart caching, duplicate detection, and source file deletion.",
   "author": "Laurent Ongaro",
